@@ -1,0 +1,118 @@
+from __future__ import division
+import json
+import re
+import os
+from collections import OrderedDict
+from keyword import kwlist
+
+special_chars = set(r" .,<>/?;:'|[{]}=+-)(*&^%$#@!`~" + '"')
+regex_chars = set(r"]")
+pyspecchar = list(special_chars - regex_chars)
+escaped_chars = ["\%s" % c for c in regex_chars]
+insertion = ''.join(pyspecchar + escaped_chars)
+UNPYTHONIC_REGEX = re.compile(r"^\d|[%s\s]+" % insertion)
+del pyspecchar, escaped_chars, insertion, special_chars, regex_chars
+
+
+def is_name_pythonic(name):
+    return not UNPYTHONIC_REGEX.match(name) or name in kwlist
+
+
+def load_commented_json(filepath, **kwargs):
+    regex = r'\s*(#|\/{2}).*$'
+    regex_inline = r'(:?(?:\s)*([A-Za-z\d\.{}]*)|((?<=\").*\"),?)(?:\s)*(((#|(\/{2})).*)|)$'
+
+    pipe = []
+    with open(filepath) as reader:
+        for line in reader:
+            if re.search(regex, line):
+                if re.search(r'^' + regex, line, re.IGNORECASE): continue
+                elif re.search(regex_inline, line):
+                    pipe.append(re.sub(regex_inline, r'\1', line))
+            else:
+                pipe.append(line)
+
+    return json.loads("\n".join(pipe), **kwargs)
+
+
+class ConfigParseError(IOError):
+    pass
+
+
+class ConfigSpecificationError(AttributeError):
+    pass
+
+
+class Config(object):
+
+    @staticmethod
+    def fromfile(fp):
+        dict_ = load_commented_json(fp, object_pairs_hook=OrderedDict)
+        root_name, _ = os.path.splitext(os.path.basename(fp))
+        return Config(dict_, file=fp, name=root_name)
+
+    def __init__(self, config_dict, name=None, parent=None, file=None):
+        self._d = OrderedDict()
+        self._attrs = set()
+        self._name = name
+        self._parent = parent
+        self._file = file
+
+        existing_vals = set(dir(self))
+        for key, val in config_dict.iteritems():
+            if key in existing_vals:
+                raise ConfigParseError(key)
+
+            if isinstance(val, dict):
+                val = Config(val, key, self, file)
+            elif isinstance(val, list):
+                val = [
+                       Config(item, key + "[%s]" % i, self, file)
+                       if isinstance(item, dict)
+                       else item
+                       for i, item in enumerate(val)
+                       ]
+
+            if not is_name_pythonic(key):
+                self._d[key] = val
+            else:
+                setattr(self, key, val)
+                self._attrs.add(key)
+                self._d[key] = val  # Also copy to the dict
+        self._attrs = frozenset(self._attrs)
+
+    @property
+    def asdict(self):
+        """Getter for the dict of un-pythonic names"""
+        return self._d
+
+    @property
+    def attrs(self):
+        return self._attrs
+
+    @property
+    def name(self):
+        return self._name
+
+    @property
+    def parent(self):
+        return self._parent
+
+    @property
+    def namespace(self):
+        name = self._name if self._name is not None else '<unnamed>'
+        if self._parent is None:
+            return name
+        return '.'.join([self._parent.namespace, name])
+
+    def __str__(self):
+        if self._parent is None:
+            return "Config @%s" % self._file
+
+        return "Config(%s) @%s" % (self.namespace, self._file)
+
+    def __getattr__(self, item):
+        raise ConfigSpecificationError("Item '%s' is missing from config <%s>" % (item, self.namespace))
+
+    def __contains__(self, item):
+        return item in self._d
