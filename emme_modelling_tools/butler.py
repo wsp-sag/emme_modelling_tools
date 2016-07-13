@@ -76,12 +76,9 @@ class MatrixButler(object):
 
     @staticmethod
     def _clear_tables(db):
-        sql = """
-        DROP TABLE IF EXISTS properties
-        DROP TABLE IF EXISTS zone_system
-        DROP TABLE IF EXISTS matrices;
-        """
-        db.execute(sql)
+        db.execute("DROP TABLE IF EXISTS properties;")
+        db.execute("DROP TABLE IF EXISTS zone_system;")
+        db.execute("DROP TABLE IF EXISTS matrices;")
         db.commit()
 
     @staticmethod
@@ -98,7 +95,7 @@ class MatrixButler(object):
         INSERT INTO properties
         VALUES (?, ?)
         """
-        db.execute(sql, 'max_zones_fortran', fortran_max_zones)
+        db.execute(sql, ('max_zones_fortran', fortran_max_zones))
 
         sql = """
         CREATE TABLE zone_system(
@@ -112,8 +109,9 @@ class MatrixButler(object):
         INSERT INTO zone_system
         VALUES (?, ?)
         """
-        for tupl in enumerate(zone_system):
-            db.execute(sql, *tupl)
+        for i, zone in enumerate(zone_system):
+            zone = int(zone)  # Cast to Python INT, because SQLite doesn't like NumPy integers.
+            db.execute(sql, (i, zone))
 
         sql = """
         CREATE TABLE matrices(
@@ -192,11 +190,12 @@ class MatrixButler(object):
         FROM matrices
         WHERE id=?
         """
-        result = list(self._connection.execute(sql, unique_id))
+        result = list(self._connection.execute(sql, [unique_id]))
         if not result:
             raise KeyError(unique_id)
         assert len(result) == 1
-        return result[0]['number']
+        mfn = result[0]['number']
+        return "mf%s.%s" % (mfn, self.MATRIX_EXTENSION)
 
     def _next_mfid(self):
         """Gets the next available matrix ID from the current path."""
@@ -208,7 +207,7 @@ class MatrixButler(object):
         return fn
 
     def _store_matrix(self, array, target_mfid):
-        fp = path.join(self._path, '.'.join([target_mfid, self.MATRIX_EXTENSION]))
+        fp = path.join(self._path, target_mfid)
 
         n, _ = array.shape
         padding = self._max_zones_fortran - n
@@ -217,7 +216,7 @@ class MatrixButler(object):
         to_binary_matrix(array, fp)
 
     def _dispense_matrix(self, source_mfid):
-        fp = path.join(self._path, '.'.join([source_mfid, self.MATRIX_EXTENSION]))
+        fp = path.join(self._path, source_mfid)  #'.'.join([source_mfid, self.MATRIX_EXTENSION]))
         return from_binary_matrix(fp, self._zone_system)
 
     def _copy_from_bank(self, source_mfid, target_mfid, emmebank):
@@ -268,7 +267,7 @@ class MatrixButler(object):
         else:
             raise TypeError(type(dataframe_or_mfid))
 
-        target_number = int(target_mfid[2:])
+        target_number = target_mfid.split('.')[0][2:]
         self._write_matrix_record(unique_id, target_number, description, str(dt.now()))
 
     def load_matrix(self, unique_id, target_mfid=None, emmebank=None):
@@ -307,3 +306,6 @@ class MatrixButler(object):
         """
         zero_matrix = pd.DataFrame(0.0, index=self._zone_system, columns=self._zone_system)
         self.save_matrix(zero_matrix, unique_id, description)
+
+    def __del__(self):
+        self._connection.close()
