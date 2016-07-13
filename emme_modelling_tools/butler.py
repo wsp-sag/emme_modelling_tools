@@ -1,13 +1,23 @@
+from __future__ import division
+
 import os
 from os import path
 import pandas as pd
+import sqlite3 as sqlite
+from datetime import datetime as dt
 
 from ..matrix_converters.matrix_converters.emme import from_emx, to_emx
 from ..matrix_converters.matrix_converters.fortran import from_binary_matrix, to_binary_matrix
+from ..matrix_converters.matrix_converters.common import expand_array, coerce_matrix
 
-import inro.modeller as m
-mm = m.Modeller()
-project_emmebank = mm.emmebank
+try:
+    import inro.modeller as m
+    mm = m.Modeller()
+    project_emmebank = mm.emmebank
+    del mm, m
+except (ImportError, AssertionError):
+    # AssertionError is thrown by Emme if a Modeller connection already exists.
+    project_emmebank = None
 
 
 class MatrixButler(object):
@@ -23,80 +33,217 @@ class MatrixButler(object):
     the 'EMX' format.
     """
 
-    METADATA_SCHEMA = ['unique_id', 'mfid', 'description', 'timestamp']
     MATRIX_EXTENSION = 'bin'
     SUBDIRECTORY_NAME = 'emmebin'
 
-    def __init__(self, parent_directory, zone_system, emme_max_zones, fortran_max_zones, allow_overwrite=False):
+    @staticmethod
+    def create(parent_directory, zone_system, fortran_max_zones):
         """
-        Constructs a new MatrixButler
+        Creates a new (or clears and initializes and existing) MatrixButler.
 
         Args:
-            parent_directory (unicode): Filepath to parent directory. The Butler's files will live in
-                <parent_directory>/emmemat
-            zone_system (List or ndarray): The zone system. Matrices given to the butler must be compatible with this
-                zone system
-            emme_max_zones (int): The maximum number of zones dimensioned by the current Emme license.
-            fortran_max_zones (int):
-            allow_overwrite (bool):
+            parent_directory (unicode): The parent directory in which to keep the Butler.
+            zone_system (pandas.Int64Index or List[int]): The zone system to conform to.
+            fortran_max_zones (int): The total number of zones expected by the FORTRAN matrix reader.
+
+        Returns:
+            MatrixButler instance.
         """
-        self._path = path.join(parent_directory, self.SUBDIRECTORY_NAME)
-        self._config_path = path.join(self._path, 'config.ini')
-        self._directory_path = path.join(self._path, 'matrix_directory.csv')
+        zone_system = pd.Int64Index(zone_system)
+        fortran_max_zones = int(fortran_max_zones)
 
-        try:
-            self._read_config_file()
-            self._read_matrix_directory()
+        butler_path = path.join(parent_directory, MatrixButler.SUBDIRECTORY_NAME)
 
-            assert self._max_zones_emme == emme_max_zones
-            assert self._max_zones_fortran == fortran_max_zones
-            assert self._zone_system.equals(zone_system)
-        except:
-            if not allow_overwrite:
-                raise
+        if path.exists(butler_path):
+            # Clear any existing matrices from the Butler
+            for fn in os.listdir(butler_path):
+                if fn.endswith(MatrixButler.MATRIX_EXTENSION):
+                    fp = path.join(butler_path, fn)
+                    os.remove(fp)
+        else:
+            os.makedirs(butler_path)
 
-            # If any error is found (and overwriting is allowed), clobber the existing metadata and Butler directory
-            # with the constructor args.
+        dbfile = path.join(butler_path, "matrix_directory.sqlite")
+        db_exists = path.exists(dbfile)  # Connecting to a non-existent file will create the file, so cahce this first
+        db = sqlite.connect(dbfile)
+        db.row_factory = sqlite.Row
 
-            if path.exists(self._path):
-                # Wipe any existing binary matrices in the existing folder
-                for fn in os.listdir(self._path):
-                    if fn.endswith(self.MATRIX_EXTENSION):
-                        fp = path.join(self._path, fn)
-                        os.remove(fp)
-            else:
-                os.makedirs(self._path)
-            self._metadata = pd.DataFrame(columns=self.METADATA_SCHEMA).set_index('unique_id')
-            self._zone_system = pd.Index(zone_system)
-            self._max_zones_emme = int(emme_max_zones)
-            self._max_zones_fortran = int(fortran_max_zones)
+        if db_exists:
+            MatrixButler._clear_tables(db)
+        MatrixButler._create_tables(db, zone_system, fortran_max_zones)
 
-    def _read_config_file(self):
-        with open(self._config_path) as reader:
-            self._max_zones_emme = int(reader.readline().strip())
-            self._max_zones_fortran = int(reader.readline().strip())
-            self._zone_system = pd.Index([int(i) for i in reader.readline().strip().split(',')])
+        return MatrixButler(butler_path, db, zone_system, fortran_max_zones)
 
-    def _write_config_file(self):
-        lines = [
-            str(self._max_zones_emme), str(self._max_zones_fortran), ','.join(str(z) for z in self._zone_system)
-        ]
-        with open(self._config_path, 'w') as writer:
-            writer.write('\n'.join(lines))
+    @staticmethod
+    def _clear_tables(db):
+        sql = """
+        DROP TABLE IF EXISTS properties
+        DROP TABLE IF EXISTS zone_system
+        DROP TABLE IF EXISTS matrices;
+        """
+        db.execute(sql)
+        db.commit()
 
-    def _read_matrix_directory(self):
-        df = pd.read_csv(self._directory_path, index_col='unique_id', usecols=self.METADATA_SCHEMA)
-        df.index.name = self.METADATA_SCHEMA[0]
-        self._metadata = df
+    @staticmethod
+    def _create_tables(db, zone_system, fortran_max_zones):
+        sql = """
+        CREATE TABLE properties(
+        name VARCHAR NOT NULL PRIMARY KEY,
+        value VARCHAR
+        );
+        """
+        db.execute(sql)
 
-    def _write_matrix_directory(self):
-        self._metadata.to_csv(self._directory_path, index=True, header=True)
+        sql = """
+        INSERT INTO properties
+        VALUES (?, ?)
+        """
+        db.execute(sql, 'max_zones_fortran', fortran_max_zones)
 
-    def __del__(self):
-        self._write_config_file()
-        self._write_matrix_directory()
+        sql = """
+        CREATE TABLE zone_system(
+        number INT NOT NULL PRIMARY KEY,
+        zone INT
+        );
+        """
+        db.execute(sql)
 
-    def save_matrix(self, dataframe_or_mfid, unique_id, description, emmebank=None):
+        sql = """
+        INSERT INTO zone_system
+        VALUES (?, ?)
+        """
+        for tupl in enumerate(zone_system):
+            db.execute(sql, *tupl)
+
+        sql = """
+        CREATE TABLE matrices(
+        id VARCHAR NOT NULL PRIMARY KEY,
+        number INT,
+        description VARCHAR,
+        timestamp VARCHAR
+        );
+        """
+        db.execute(sql)
+        db.commit()
+
+    @staticmethod
+    def connect(parent_directory):
+        """
+        Connect to an existing MatrixButler, without initializing it
+
+        Args:
+            parent_directory (unicode): The parent directory in which to find the MatrixButler.
+
+        Returns:
+            IOError if a MatrixButler cannot be found at the given parent directory.
+
+        """
+        butler_path = path.join(parent_directory, MatrixButler.SUBDIRECTORY_NAME)
+        if not os.path.exists(butler_path):
+            raise IOError("No matrix butler found at '%s'" % parent_directory)
+
+        dbfile = path.join(butler_path, "matrix_directory.sqlite")
+        if not os.path.exists(dbfile):
+            raise IOError("No matrix butler found at '%s'" % parent_directory)
+
+        db = sqlite.connect(dbfile)
+        db.row_factory = sqlite.Row
+        fortran_max_zones, zone_system = MatrixButler._preload(db)
+
+        return MatrixButler(butler_path, db, zone_system, fortran_max_zones)
+
+    @staticmethod
+    def _preload(db):
+        sql = """
+        SELECT *
+        FROM properties
+        WHERE name="max_zones_fortran"
+        """
+        result = list(db.execute(sql))
+        fortran_max_zones = result[0]['value']
+
+        sql = """
+        SELECT *
+        FROM zone_system
+        """
+        result = list(db.execute(sql))
+        zone_system = pd.Int64Index([int(record['zone']) for record in result])
+
+        return fortran_max_zones, zone_system
+
+    def __init__(self, *args):
+        butler_path, db, zone_system, fortran_max_zones = args
+        self._path = butler_path
+        self._connection = db
+        self._zone_system = zone_system
+        self._max_zones_fortran = fortran_max_zones
+
+    def _write_matrix_record(self, unique_id, number, description, timestamp):
+        sql = """
+        INSERT OR REPLACE INTO matrices
+        VALUES (?, ?, ?, ?)
+        """
+        self._connection.execute(sql, (unique_id, number, description, timestamp))
+        self._connection.commit()
+
+    def _lookup_matrix(self, unique_id):
+        sql = """
+        SELECT *
+        FROM matrices
+        WHERE id=?
+        """
+        result = list(self._connection.execute(sql, unique_id))
+        if not result:
+            raise KeyError(unique_id)
+        assert len(result) == 1
+        return result[0]['number']
+
+    def _next_mfid(self):
+        """Gets the next available matrix ID from the current path."""
+        i = 1
+        fn = "mf%s.%s" % (i, self.MATRIX_EXTENSION)
+        while os.path.exists(os.path.join(self._path, fn)):
+            i += 1
+            fn = "mf%s.%s" % (i, self.MATRIX_EXTENSION)
+        return fn
+
+    def _store_matrix(self, array, target_mfid):
+        fp = path.join(self._path, '.'.join([target_mfid, self.MATRIX_EXTENSION]))
+
+        n, _ = array.shape
+        padding = self._max_zones_fortran - n
+        if padding > 0:
+            array = expand_array(array, padding)
+        to_binary_matrix(array, fp)
+
+    def _dispense_matrix(self, source_mfid):
+        fp = path.join(self._path, '.'.join([source_mfid, self.MATRIX_EXTENSION]))
+        return from_binary_matrix(fp, self._zone_system)
+
+    def _copy_from_bank(self, source_mfid, target_mfid, emmebank):
+        """Low-level function to get a matrix from Emmebank"""
+        emmebank = project_emmebank if emmebank is None else emmebank
+        assert emmebank is not None
+
+        source_mfid = emmebank.matrix(source_mfid).id
+        bank_path = os.path.dirname(emmebank.path)
+        source_fp = os.path.join(bank_path, 'emmemat', source_mfid + ".emx")
+
+        matrix = from_emx(source_fp, zones=self._zone_system).values
+        self._store_matrix(matrix, target_mfid)
+
+    def _copy_to_bank(self, source_mfid, target_mfid, emmebank):
+        emmebank = project_emmebank if emmebank is None else emmebank
+        assert emmebank is not None
+
+        matrix = self._dispense_matrix(source_mfid).values
+        target_mfid = emmebank.matrix(target_mfid).id
+
+        bank_path = os.path.dirname(emmebank.path)
+        target_fp = os.path.join(bank_path, 'emmemat', target_mfid + ".emx")
+        to_emx(matrix, target_fp, emmebank.dimensions['centroids'])
+
+    def save_matrix(self, dataframe_or_mfid, unique_id, description="", emmebank=None):
         """
         Passes a matrix to the butler for safekeeping.
 
@@ -106,23 +253,23 @@ class MatrixButler(object):
             unique_id (basestring): The unique identifier for this matrix.
             description (basestring): A brief description of the matrix.
             emmebank (Emmebank or None): If using an mfid for the first arg, its matrix will be pulled from this
-                Emmebank. If None, the current Emmebank will be used.
+                Emmebank. Defaults to the Emmebank of the current Emme project when launched from Emme Python
         """
-        pass
+        try:
+            target_mfid = self._lookup_matrix(unique_id)
+        except KeyError:
+            target_mfid = self._next_mfid()
 
-    def _copy_from_bank(self, target_mfid, source_mfid, emmebank):
-        pass
+        if isinstance(dataframe_or_mfid, basestring):
+            self._copy_from_bank(dataframe_or_mfid, target_mfid, emmebank)
+        elif isinstance(dataframe_or_mfid, (pd.DataFrame, pd.Series)):
+            matrix = coerce_matrix(dataframe_or_mfid, allow_raw=True)
+            self._store_matrix(matrix, target_mfid)
+        else:
+            raise TypeError(type(dataframe_or_mfid))
 
-    def init_matrix(self, unique_id, description):
-        """
-        Registers a new (or zeros an old) matrix with the butler.
-
-        Args:
-            unique_id (unicode): The unique identifier for this matrix.
-            description (unicode):  A brief description of the matrix.
-
-        """
-        pass
+        target_number = int(target_mfid[2:])
+        self._write_matrix_record(unique_id, target_number, description, str(dt.now()))
 
     def load_matrix(self, unique_id, target_mfid=None, emmebank=None):
         """
@@ -133,7 +280,7 @@ class MatrixButler(object):
             target_mfid (unicode or None): If provided, the butler will copy the matrix into the Emmebank at this
                 given matrix ID or name. This matrix must already exist
             emmebank (Emmebank or None): Alternate Emmebank in which to save the matrix, if `target_mfid` is provided.
-                Defaults to the Emmebank of the current project
+                Defaults to the Emmebank of the current Emme project when launched from Emme Python
 
         Returns: DataFrame or None, depending on whether `target_mfid` is given.
 
@@ -142,4 +289,21 @@ class MatrixButler(object):
             AttributeError if target_mfid does not exist.
 
         """
-        pass
+        source_mfid = self._lookup_matrix(unique_id)
+
+        if target_mfid is not None:
+            self._copy_to_bank(source_mfid, target_mfid, emmebank)
+        else:
+            return self._dispense_matrix(source_mfid)
+
+    def init_matrix(self, unique_id, description=""):
+        """
+        Registers a new (or zeros an old) matrix with the butler.
+
+        Args:
+            unique_id (unicode): The unique identifier for this matrix.
+            description (unicode):  A brief description of the matrix.
+
+        """
+        zero_matrix = pd.DataFrame(0.0, index=self._zone_system, columns=self._zone_system)
+        self.save_matrix(zero_matrix, unique_id, description)
