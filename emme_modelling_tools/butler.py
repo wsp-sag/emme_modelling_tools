@@ -5,6 +5,7 @@ from os import path
 import pandas as pd
 import sqlite3 as sqlite
 from datetime import datetime as dt
+from warnings import warn
 
 from ..matrix_converters.matrix_converters.emme import from_emx, to_emx
 from ..matrix_converters.matrix_converters.fortran import from_binary_matrix, to_binary_matrix
@@ -18,6 +19,10 @@ try:
 except (ImportError, AssertionError):
     # AssertionError is thrown by Emme if a Modeller connection already exists.
     project_emmebank = None
+
+
+class ButlerOverwriteWarning(RuntimeWarning):
+    pass
 
 
 class MatrixButler(object):
@@ -54,23 +59,31 @@ class MatrixButler(object):
 
         butler_path = path.join(parent_directory, MatrixButler.SUBDIRECTORY_NAME)
 
-        if path.exists(butler_path):
-            # Clear any existing matrices from the Butler
-            for fn in os.listdir(butler_path):
-                if fn.endswith(MatrixButler.MATRIX_EXTENSION):
-                    fp = path.join(butler_path, fn)
-                    os.remove(fp)
-        else:
+        if not path.exists(butler_path):
             os.makedirs(butler_path)
 
         dbfile = path.join(butler_path, "matrix_directory.sqlite")
-        db_exists = path.exists(dbfile)  # Connecting to a non-existent file will create the file, so cahce this first
+        db_exists = path.exists(dbfile)  # Connecting to a non-existent file will create the file, so cache this first
         db = sqlite.connect(dbfile)
         db.row_factory = sqlite.Row
 
         if db_exists:
-            MatrixButler._clear_tables(db)
-        MatrixButler._create_tables(db, zone_system, fortran_max_zones)
+            fortran_max_zones_existing, zone_system_existing = MatrixButler._preload(db)
+            existing_is_compatible = fortran_max_zones == fortran_max_zones_existing and zone_system.equals(zone_system_existing)
+            if not existing_is_compatible:
+                msg = "Existing matrix cache not compatible with current zone system and will be cleared of any" \
+                      " stored matrix files. Cache directory is '%s'" % parent_directory
+                warn(ButlerOverwriteWarning(msg))
+
+                for fn in os.listdir(butler_path):
+                    if fn.endswith(MatrixButler.MATRIX_EXTENSION):
+                        fp = path.join(butler_path, fn)
+                        os.remove(fp)
+                MatrixButler._clear_tables(db)
+                MatrixButler._create_tables(db, zone_system, fortran_max_zones)
+            # When the db exits AND is compatible, there's no need to create the tables
+        else:
+            MatrixButler._create_tables(db, zone_system, fortran_max_zones)
 
         return MatrixButler(butler_path, db, zone_system, fortran_max_zones)
 
@@ -158,7 +171,7 @@ class MatrixButler(object):
         WHERE name="max_zones_fortran"
         """
         result = list(db.execute(sql))
-        fortran_max_zones = result[0]['value']
+        fortran_max_zones = int(result[0]['value'])
 
         sql = """
         SELECT *
