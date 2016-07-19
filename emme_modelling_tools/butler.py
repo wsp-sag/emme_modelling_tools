@@ -38,6 +38,8 @@ class MatrixButler(object):
     the 'EMX' format.
     """
 
+    # TODO: Add method to batch-save matrices, as sqlite.commit() is a relatively expensive operation.
+
     MATRIX_EXTENSION = 'bin'
     SUBDIRECTORY_NAME = 'emmebin'
 
@@ -319,6 +321,28 @@ class MatrixButler(object):
         """
         zero_matrix = pd.DataFrame(0.0, index=self._zone_system, columns=self._zone_system)
         self.save_matrix(zero_matrix, unique_id, description)
+
+    def delete_matrix(self, unique_id):
+        """
+        Deletes a matrix from the butler's directory
+
+        Args:
+            unique_id (unicode): The unique identifier of the matrix to delete.
+
+        Raises:
+            KeyError if unique_id cannot be found.
+
+        """
+        fn = self._lookup_matrix(unique_id)
+        fp = path.join(self._path, fn)
+        os.remove(fp)
+
+        sql = """
+        DELETE FROM matrices
+        WHERE id=?
+        """
+        self._connection.execute(sql, [unique_id])
+        self._connection.commit()
 
     def __del__(self):
         self._connection.close()
