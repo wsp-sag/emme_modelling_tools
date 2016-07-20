@@ -38,8 +38,6 @@ class MatrixButler(object):
     the 'EMX' format.
     """
 
-    # TODO: Add method to batch-save matrices, as sqlite.commit() is a relatively expensive operation.
-
     MATRIX_EXTENSION = 'bin'
     SUBDIRECTORY_NAME = 'emmebin'
 
@@ -191,13 +189,16 @@ class MatrixButler(object):
         self._zone_system = zone_system
         self._max_zones_fortran = fortran_max_zones
 
+        self._committing = True
+
     def _write_matrix_record(self, unique_id, number, description, timestamp):
         sql = """
         INSERT OR REPLACE INTO matrices
         VALUES (?, ?, ?, ?)
         """
         self._connection.execute(sql, (unique_id, number, description, timestamp))
-        self._connection.commit()
+        if self._committing:
+            self._connection.commit()
 
     def _lookup_matrix(self, unique_id):
         sql = """
@@ -342,7 +343,22 @@ class MatrixButler(object):
         WHERE id=?
         """
         self._connection.execute(sql, [unique_id])
-        self._connection.commit()
+        if self._committing:
+            self._connection.commit()
 
     def __del__(self):
+        self._connection.commit()
         self._connection.close()
+
+    '''
+    When used as a context manager, matrix writes can be 'batched'; i.e. changes to the DB won't be committed until
+    the context is closed. Committing to the DB is quite expensive (it doubles the run time when writing a new matrix)
+    so this should save some time when the user wants to batch-out several matrices.
+    '''
+
+    def __enter__(self):
+        self._committing = False
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._connection.commit()
+        self._committing = True
