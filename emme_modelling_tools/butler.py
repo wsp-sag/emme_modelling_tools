@@ -8,7 +8,7 @@ from datetime import datetime as dt
 from warnings import warn
 
 from ..matrix_converters.matrix_converters.emme import from_emx, to_emx
-from ..matrix_converters.matrix_converters.fortran import from_binary_matrix, to_binary_matrix
+from ..matrix_converters.matrix_converters.fortran import from_fortran_rectangle, to_fortran
 from ..matrix_converters.matrix_converters.common import expand_array, coerce_matrix
 
 try:
@@ -229,11 +229,12 @@ class MatrixButler(object):
         padding = self._max_zones_fortran - n
         if padding > 0:
             array = expand_array(array, padding)
-        to_binary_matrix(array, fp)
+        to_fortran(array, fp)
 
     def _dispense_matrix(self, source_mfid):
-        fp = path.join(self._path, source_mfid)  #'.'.join([source_mfid, self.MATRIX_EXTENSION]))
-        return from_binary_matrix(fp, self._zone_system)
+        fp = path.join(self._path, source_mfid)
+        return from_fortran_rectangle(fp, self._max_zones_fortran, zones=self._zone_system, reindex_rows=True,
+                                      fill_value=0.0)
 
     def _copy_from_bank(self, source_mfid, target_mfid, emmebank):
         """Low-level function to get a matrix from Emmebank"""
