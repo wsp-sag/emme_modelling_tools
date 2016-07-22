@@ -131,7 +131,8 @@ class MatrixButler(object):
         id VARCHAR NOT NULL PRIMARY KEY,
         number INT,
         description VARCHAR,
-        timestamp VARCHAR
+        timestamp VARCHAR,
+        type VARCHAR
         );
         """
         db.execute(sql)
@@ -191,12 +192,12 @@ class MatrixButler(object):
 
         self._committing = True
 
-    def _write_matrix_record(self, unique_id, number, description, timestamp):
+    def _write_matrix_record(self, unique_id, number, description, timestamp, type_):
         sql = """
         INSERT OR REPLACE INTO matrices
-        VALUES (?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?)
         """
-        self._connection.execute(sql, (unique_id, number, description, timestamp))
+        self._connection.execute(sql, (unique_id, number, description, timestamp, type_))
         if self._committing:
             self._connection.commit()
 
@@ -259,7 +260,7 @@ class MatrixButler(object):
         target_fp = os.path.join(bank_path, 'emmemat', target_mfid + ".emx")
         to_emx(matrix, target_fp, emmebank.dimensions['centroids'])
 
-    def save_matrix(self, dataframe_or_mfid, unique_id, description="", emmebank=None):
+    def save_matrix(self, dataframe_or_mfid, unique_id, description="", emmebank=None, type_name=""):
         """
         Passes a matrix to the butler for safekeeping.
 
@@ -270,6 +271,7 @@ class MatrixButler(object):
             description (basestring): A brief description of the matrix.
             emmebank (Emmebank or None): If using an mfid for the first arg, its matrix will be pulled from this
                 Emmebank. Defaults to the Emmebank of the current Emme project when launched from Emme Python
+            type_name (basestring): The string type
         """
         try:
             target_mfid = self._lookup_matrix(unique_id)
@@ -285,7 +287,7 @@ class MatrixButler(object):
             raise TypeError(type(dataframe_or_mfid))
 
         target_number = target_mfid.split('.')[0][2:]
-        self._write_matrix_record(unique_id, target_number, description, str(dt.now()))
+        self._write_matrix_record(unique_id, target_number, description, str(dt.now()), type_name)
 
     def load_matrix(self, unique_id, target_mfid=None, emmebank=None):
         """
@@ -346,6 +348,41 @@ class MatrixButler(object):
         self._connection.execute(sql, [unique_id])
         if self._committing:
             self._connection.commit()
+
+    def query_by_type(self, type_name):
+        """
+        Gets a list of matrix IDs by their type name
+
+        Args:
+            type_name (basestring): The type name to query
+
+        Returns:
+            A list of matching IDs
+        """
+        sql = """
+        SELECT id FROM matrices
+        WHERE type=?
+        ;
+        """
+        return list(self._connection.execute(sql, [type_name]))
+
+    def query_by_id(self, id_pattern):
+        """
+        Queries unique ids by a valid SQL LIKE pattern.
+
+        Args:
+            unique_id (basestring): The pattern to match by
+
+        Returns:
+            A list of matching IDs
+
+        """
+        sql = """
+        SELECT id FROM matrices
+        WHERE id LIKE '%?%'
+        ;
+        """
+        return list(self._connection.execute(sql, [id_pattern]))
 
     def __del__(self):
         self._connection.commit()
