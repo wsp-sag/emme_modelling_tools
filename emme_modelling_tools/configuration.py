@@ -117,18 +117,18 @@ class Config(object):
     def __contains__(self, item):
         return item in self._d
 
-    def _encode(self):
+    def serialize(self):
         child_dict = OrderedDict()
         for attr, item in self._d.iteritems():
             if isinstance(item, Config):
-                child_dict[attr] = item._encode()
+                child_dict[attr] = item.serialize()
             elif isinstance(item, list):
-                child_dict[attr] = [x._encode() if isinstance(x, Config) else x for x in item]
+                child_dict[attr] = [x.serialize() if isinstance(x, Config) else x for x in item]
             else:
                 child_dict[attr] = item
         return child_dict
 
     def tofile(self, fp):
-        dict_ = self._encode()
+        dict_ = self.serialize()
         with open(fp, 'w') as writer:
             json.dump(dict_, writer, indent=2)
