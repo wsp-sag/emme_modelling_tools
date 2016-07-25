@@ -364,7 +364,7 @@ class MatrixButler(object):
         WHERE type=?
         ;
         """
-        return list(self._connection.execute(sql, [type_name]))
+        return [item['id'] for item in self._connection.execute(sql, [type_name])]
 
     def query_by_id(self, id_pattern):
         """
@@ -382,7 +382,7 @@ class MatrixButler(object):
         WHERE id LIKE '%?%'
         ;
         """
-        return list(self._connection.execute(sql, [id_pattern]))
+        return [item['id'] for item in self._connection.execute(sql, [id_pattern])]
 
     def __del__(self):
         self._connection.commit()
