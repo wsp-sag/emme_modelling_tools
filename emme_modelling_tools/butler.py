@@ -201,7 +201,7 @@ class MatrixButler(object):
         if self._committing:
             self._connection.commit()
 
-    def _lookup_matrix(self, unique_id):
+    def lookup_id(self, unique_id):
         sql = """
         SELECT *
         FROM matrices
@@ -211,7 +211,10 @@ class MatrixButler(object):
         if not result:
             raise KeyError(unique_id)
         assert len(result) == 1
-        mfn = result[0]['number']
+        return int(result[0]['number'])
+
+    def _lookup_matrix(self, unique_id):
+        mfn = self.lookup_id(unique_id)
         return "mf%s.%s" % (mfn, self.MATRIX_EXTENSION)
 
     def _next_mfid(self):
