@@ -7,8 +7,7 @@ import sqlite3 as sqlite
 from datetime import datetime as dt
 from warnings import warn
 
-from ..matrix_converters.matrix_converters.emme import from_emx, to_emx
-from ..matrix_converters.matrix_converters.fortran import from_fortran_rectangle, to_fortran
+from ..matrix_converters import from_emx, to_emx, from_fortran_rectangle, to_fortran
 from ..matrix_converters.matrix_converters.common import expand_array, coerce_matrix
 
 try:
