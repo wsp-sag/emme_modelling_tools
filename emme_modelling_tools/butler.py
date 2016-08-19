@@ -6,6 +6,7 @@ import pandas as pd
 import sqlite3 as sqlite
 from datetime import datetime as dt
 from warnings import warn
+from contextlib import contextmanager
 
 from ..matrix_converters import from_emx, to_emx, from_fortran_rectangle, to_fortran
 from ..matrix_converters.matrix_converters.common import expand_array, coerce_matrix
@@ -386,19 +387,25 @@ class MatrixButler(object):
         """
         return [item['id'] for item in self._connection.execute(sql, [id_pattern])]
 
+    @contextmanager
+    def batch_save_matrices(self):
+        """
+        Context-manager for writing several matrices in one batch. Reduces write time per matrix by committing changes
+        to the DB at the end of the batch write. The time savings can be quite significant, as the DB-write is normally
+        50% of the time per matrix write.
+
+        Yields: None
+
+        """
+
+        self._committing = False
+
+        try:
+            yield
+        finally:
+            self._connection.commit()
+            self._committing = True
+
     def __del__(self):
         self._connection.commit()
         self._connection.close()
-
-    '''
-    When used as a context manager, matrix writes can be 'batched'; i.e. changes to the DB won't be committed until
-    the context is closed. Committing to the DB is quite expensive (it doubles the run time when writing a new matrix)
-    so this should save some time when the user wants to batch-out several matrices.
-    '''
-
-    def __enter__(self):
-        self._committing = False
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._connection.commit()
-        self._committing = True
