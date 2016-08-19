@@ -317,7 +317,7 @@ class MatrixButler(object):
         else:
             return self._dispense_matrix(source_mfid)
 
-    def init_matrix(self, unique_id, description=""):
+    def init_matrix(self, unique_id, description="", type_name=""):
         """
         Registers a new (or zeros an old) matrix with the butler.
 
@@ -327,7 +327,7 @@ class MatrixButler(object):
 
         """
         zero_matrix = pd.DataFrame(0.0, index=self._zone_system, columns=self._zone_system)
-        self.save_matrix(zero_matrix, unique_id, description)
+        self.save_matrix(zero_matrix, unique_id, description, type_name)
 
     def delete_matrix(self, unique_id):
         """
