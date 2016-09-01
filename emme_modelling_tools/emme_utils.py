@@ -6,6 +6,7 @@ from shapely.geometry import Point, LineString, Polygon
 import shapelib as shp
 import dbflib as dbf
 from os import path
+import os
 
 import pandas as pd
 import numpy as np
@@ -555,3 +556,19 @@ def pandas_to_matrix(series_or_dataframe, mtx_out=None, scenario_id=None):
         mtx_out.set_data(md, scenario_id=scenario_id)
         return
     return md
+
+
+def parallel_strategy_allowed(logr):
+    # Check for Emme 4.3 OR for a test-beta version. By default, if there's a problem, turn off parallel analysis
+    try:
+        if os.environ['EMMEPATH'].endswith('Emme-test-160811'):
+            logr.warn("Detected test version of Emme base on EMMEPATH environmental variable. Turning on parallel analysis, "
+                      "but be aware that this check may not be future-proof")
+            return True
+        elif mm.desktop.version_info >= (4,3):
+            logr.warn("Emme 4.3 detected. Turning on parallel analysis")
+            return True
+    except Exception as e:
+        # If there's some error in checking version, leave PARALLEL_ANALYSIS turned off by default
+        logr.error("Error checking Emme version: %s" % e)
+        return False
