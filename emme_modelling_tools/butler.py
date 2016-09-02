@@ -411,6 +411,12 @@ class MatrixButler(object):
 
         """
 
+        # This snippet is just in case this function is called within its own context (e.g. someone turns on
+        # batch mode while it's already on).
+        if not self._committing:
+            yield
+            return
+
         self._committing = False
 
         try:
