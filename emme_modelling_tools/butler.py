@@ -202,6 +202,19 @@ class MatrixButler(object):
             self._connection.commit()
 
     def lookup_id(self, unique_id):
+        """
+        Looks up the matrix number of a given UID.
+
+        Args:
+            unique_id (str):
+
+        Returns:
+            int -> The number which corresponds to the UID.
+
+        Raises:
+            KeyError if UID not in MatrixButler
+
+        """
         sql = """
         SELECT *
         FROM matrices
