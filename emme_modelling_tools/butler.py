@@ -8,6 +8,8 @@ from datetime import datetime as dt
 from warnings import warn
 from contextlib import contextmanager
 
+import numpy as np
+
 from ..matrix_converters import from_emx, to_emx, from_fortran_rectangle, to_fortran
 from ..matrix_converters.matrix_converters.common import expand_array, coerce_matrix
 
@@ -253,7 +255,7 @@ class MatrixButler(object):
         return from_fortran_rectangle(fp, self._max_zones_fortran, zones=self._zone_system, reindex_rows=True,
                                       fill_value=0.0)
 
-    def _copy_from_bank(self, source_mfid, target_mfid, emmebank):
+    def _copy_from_bank(self, source_mfid, target_mfid, emmebank, fill_eminf):
         """Low-level function to get a matrix from Emmebank"""
         emmebank = project_emmebank if emmebank is None else emmebank
         assert emmebank is not None
@@ -263,6 +265,11 @@ class MatrixButler(object):
         source_fp = os.path.join(bank_path, 'emmemat', source_mfid + ".emx")
 
         matrix = from_emx(source_fp, zones=self._zone_system).values
+
+        if fill_eminf:
+            mask = (matrix == 1E20) | (matrix == -1E20)
+            np.putmask(matrix, mask, 0)
+
         self._store_matrix(matrix, target_mfid)
 
     def _copy_to_bank(self, source_mfid, target_mfid, emmebank):
@@ -276,7 +283,8 @@ class MatrixButler(object):
         target_fp = os.path.join(bank_path, 'emmemat', target_mfid + ".emx")
         to_emx(matrix, target_fp, emmebank.dimensions['centroids'])
 
-    def save_matrix(self, dataframe_or_mfid, unique_id, description="", emmebank=None, type_name=""):
+    def save_matrix(self, dataframe_or_mfid, unique_id, description="", emmebank=None, type_name="",
+                    fill_eminf=False):
         """
         Passes a matrix to the butler for safekeeping.
 
@@ -288,6 +296,8 @@ class MatrixButler(object):
             emmebank (Emmebank or None): If using an mfid for the first arg, its matrix will be pulled from this
                 Emmebank. Defaults to the Emmebank of the current Emme project when launched from Emme Python
             type_name (basestring): The string type
+            fill_eminf (bool): If true, the Butler will fill Emme's "infinity" values (+- 1.0E20) with 0 before
+                exporting. Only available if copying from an Emmebank
         """
         try:
             target_mfid = self._lookup_matrix(unique_id)
@@ -295,7 +305,7 @@ class MatrixButler(object):
             target_mfid = self._next_mfid()
 
         if isinstance(dataframe_or_mfid, basestring):
-            self._copy_from_bank(dataframe_or_mfid, target_mfid, emmebank)
+            self._copy_from_bank(dataframe_or_mfid, target_mfid, emmebank, fill_eminf)
         elif isinstance(dataframe_or_mfid, (pd.DataFrame, pd.Series)):
             matrix = coerce_matrix(dataframe_or_mfid, allow_raw=True)
             self._store_matrix(matrix, target_mfid)
