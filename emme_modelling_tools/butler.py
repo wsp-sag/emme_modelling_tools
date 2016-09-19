@@ -94,7 +94,11 @@ class MatrixButler(object):
             );
             """,
             "INSERT INTO matrices SELECT * FROM tmp1;",
-            "DROP TABLE tmp1;"
+            "DROP TABLE tmp1;",
+            """
+            INSERT INTO properties
+            VALUES ("zone_partition", -1")
+            """
         ]
         for statement in sql:
             connection.execute(statement)
@@ -168,6 +172,7 @@ class MatrixButler(object):
         VALUES (?, ?)
         """
         db.execute(sql, ('max_zones_fortran', fortran_max_zones))
+        db.execute(sql, ('zone_partition', -1))
 
         sql = """
         CREATE TABLE zone_system(
@@ -266,7 +271,33 @@ class MatrixButler(object):
 
     @property
     def zone_system(self):
-        return self._zone_system[...]
+        return self._zone_system[...]  # Ellipses to make a shallow copy
+
+    @property
+    def zone_partition(self):
+        sql = """
+        SELECT *
+        FROM properties
+        WHERE name="zone_partition"
+        """
+        result = list(self._connection.execute(sql, ''))
+        zone_partition = int(result[0]['value'])
+        return None if zone_partition <= 0 else zone_partition
+
+    @zone_partition.setter
+    def zone_partition(self, val):
+        if val is not None:
+            val = int(val)
+            assert val in self._zone_system
+        else:
+            val = -1
+        sql = """
+        INSERT OR REPLACE INTO properties
+        VALUES (?, ?)
+        """
+        self._connection.execute(sql, ('zone_partition', val))
+        if self._committing:
+            self._connection.commit()
 
     def _matrix_file(self, n):
         return path.join(self._path, "mf%s.%s" % (n, self.MATRIX_EXTENSION))
@@ -361,7 +392,11 @@ class MatrixButler(object):
     def _check_lookup(self, unique_id, n):
         try:
             numbers = self.lookup_numbers(unique_id, squeeze=False)
-            assert len(numbers) == n, "This should never happen"
+            if len(numbers) != n:
+                # Overwriting an existing matrix with different number of slices causes that matrix to be completely
+                # replaced (deleted and then overwritten)
+                self.delete_matrix(unique_id)
+                numbers = self._next_numbers(n)
         except KeyError:
             numbers = self._next_numbers(n)
 
@@ -389,10 +424,10 @@ class MatrixButler(object):
         n_slices = int(n_slices)
         assert n_slices >= 1
 
-        if partition is not None:
-            partition = int(partition)
-            assert partition in self._zone_system, "Partition zone must be in the zone system"
-            n_slices += 1  # Add a slice at the end to contain the second part of the partition
+        if partition and self.zone_partition is None:
+            warn("Cannot partition a matrix when MatrixButler.zone_partition is None.")
+            return n_slices, False
+
         return n_slices, partition
 
     def _write_matrix_files(self, matrix, files, partition):
@@ -404,8 +439,8 @@ class MatrixButler(object):
             matrix = expand_array(matrix, padding, axis=1)
 
         remainder, remainder_file = None, None
-        if partition is not None:
-            slice_end = self._zone_system.get_loc(partition) + 1
+        if partition:
+            slice_end = self._zone_system.get_loc(self.zone_partition) + 1
 
             remainder = matrix[slice_end:, :]
             remainder_file = files.pop()  # Remove from the list of files
@@ -419,10 +454,10 @@ class MatrixButler(object):
         for slice_, file_ in zip(slices, files):
             to_fortran(slice_, file_, force_square=False, min_index=min_index)
             min_index += slice_.shape[0]
-        if partition is not None:
+        if partition:
             to_fortran(remainder, remainder_file, force_square=False, min_index=min_index)
 
-    def init_matrix(self, unique_id, description="", type_name="", fill=True, n_slices=1, slice_partition=None):
+    def init_matrix(self, unique_id, description="", type_name="", fill=True, n_slices=1, partition=False):
         """
         Registers a new (or zeros an old) matrix with the butler.
 
@@ -432,8 +467,9 @@ class MatrixButler(object):
             type_name (str): Type categorization of the matrx.
             fill (bool): If False, empty (0-byte) files will be initialized. Otherwise, 0-matrix files will be created.
             n_slices (int): Number of slices (on-disk) for multi-processing.
+            partition (bool): Flag whether to partition the matrix before saving, based on self.zone_partition
         """
-        n_slices, slice_partition = self._validate_slice_args(n_slices, slice_partition)
+        n_slices, partition = self._validate_slice_args(n_slices, partition)
 
         numbers = self._check_lookup(unique_id, n_slices)
         files = [open(self._matrix_file(n), mode='wb') for n in numbers]
@@ -442,7 +478,7 @@ class MatrixButler(object):
             if fill:
                 shape = [len(self._zone_system)] * 2
                 matrix = np.zeros(shape, dtype=np.float32)
-                self._write_matrix_files(matrix, files, slice_partition)
+                self._write_matrix_files(matrix, files, partition)
         finally:
             for f in files:
                 f.close()
@@ -490,7 +526,7 @@ class MatrixButler(object):
             return matrix
 
     def save_matrix(self, dataframe_or_mfid, unique_id, description="", type_name="", scenario_id=None, emmebank=None,
-                    fill_eminf=False, n_slices=1, slice_partition=None):
+                    fill_eminf=False, n_slices=1, partition=False):
         """
         Passes a matrix to the butler for safekeeping.
 
@@ -506,10 +542,10 @@ class MatrixButler(object):
             fill_eminf (bool): If true, the Butler will fill Emme's "infinity" values (+- 1.0E20) with 0 before
                 exporting. Only available if copying from an Emmebank
             n_slices (int): Number of slices (on-disk) for multi-processing.
-
+            partition (bool): Flag whether to partition the matrix before saving, based on self.zone_partition
         """
 
-        n_slices, slice_partition = self._validate_slice_args(n_slices, slice_partition)
+        n_slices, partition = self._validate_slice_args(n_slices, partition)
 
         if isinstance(dataframe_or_mfid, basestring):
             emmebank = self._get_emmebank(emmebank)
@@ -531,7 +567,7 @@ class MatrixButler(object):
 
         numbers = self._check_lookup(unique_id, n_slices)
         files = [self._matrix_file(n) for n in numbers]
-        self._write_matrix_files(matrix, files, slice_partition)
+        self._write_matrix_files(matrix, files, partition)
 
         self._write_matrix_record(unique_id, numbers, description, type_name)
 
@@ -572,7 +608,7 @@ class MatrixButler(object):
         row = results[0]
         return dict(row)
 
-    def slice_matrix(self, unique_id, n_slices=1, slice_partition=None):
+    def slice_matrix(self, unique_id, n_slices=1, partition=None):
         """
         Slices a matrix into chunks along its rows (on-disk) for use in mutli-processing.
 
@@ -581,11 +617,11 @@ class MatrixButler(object):
         Args:
             unique_id (str): The ID of the matrix to slice
             n_slices (int): The number of slices to make
-
+            partition (bool): Flag whether to partition the matrix before saving, based on self.zone_partition
         """
         if self.is_sliced(unique_id): return  # Do nothing if matrix is already sliced
 
-        n_slices, slice_partition = self._validate_slice_args(n_slices, slice_partition)
+        n_slices, partition = self._validate_slice_args(n_slices, partition)
 
         matrix = self.load_matrix(unique_id)
         metadata = self.matrix_metadata(unique_id)
@@ -593,7 +629,7 @@ class MatrixButler(object):
         with self.batch_operations():
             self.delete_matrix(unique_id)
             self.save_matrix(matrix, unique_id, metadata['description'], metadata['type'], n_slices=n_slices,
-                             slice_partition=slice_partition)
+                             partition=partition)
 
     def unslice_matrix(self, unique_id):
         """
