@@ -552,7 +552,7 @@ class MatrixButler(object):
             matrix_container = emmebank.matrix(dataframe_or_mfid)
             if matrix_container is None: raise KeyError(dataframe_or_mfid)
 
-            matrix = matrix_to_pandas(matrix_container, scenario_id)
+            matrix = coerce_matrix(matrix_to_pandas(matrix_container, scenario_id), allow_raw=True, force_square=True)
 
             if fill_eminf:
                 mask = (matrix == 1E20) | (matrix == -1E20)
