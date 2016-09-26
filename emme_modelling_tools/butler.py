@@ -389,7 +389,9 @@ class MatrixButler(object):
             numbers.append(self._next_number)
         return numbers
 
-    def _check_lookup(self, unique_id, n):
+    def _check_lookup(self, unique_id, n, partition):
+        if partition: n += 1
+
         try:
             numbers = self.lookup_numbers(unique_id, squeeze=False)
             if len(numbers) != n:
@@ -471,7 +473,7 @@ class MatrixButler(object):
         """
         n_slices, partition = self._validate_slice_args(n_slices, partition)
 
-        numbers = self._check_lookup(unique_id, n_slices)
+        numbers = self._check_lookup(unique_id, n_slices, partition)
         files = [open(self._matrix_file(n), mode='wb') for n in numbers]
 
         try:
@@ -565,7 +567,7 @@ class MatrixButler(object):
             matrix = coerce_matrix(dataframe_or_mfid, allow_raw=True, force_square=True)
             assert matrix.shape == (len(self._zone_system),) * 2
 
-        numbers = self._check_lookup(unique_id, n_slices)
+        numbers = self._check_lookup(unique_id, n_slices, partition)
         files = [self._matrix_file(n) for n in numbers]
         self._write_matrix_files(matrix, files, partition)
 
