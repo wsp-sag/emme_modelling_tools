@@ -266,9 +266,6 @@ class MatrixButler(object):
 
         self._committing = True
 
-        self._next_number = 1
-        self._increment_next_number()
-
     @property
     def zone_system(self):
         return self._zone_system[...]  # Ellipses to make a shallow copy
@@ -301,13 +298,6 @@ class MatrixButler(object):
 
     def _matrix_file(self, n):
         return path.join(self._path, "mf%s.%s" % (n, self.MATRIX_EXTENSION))
-
-    def _increment_next_number(self):
-        self._next_number += 1
-        fp = self._matrix_file(self._next_number)
-        while path.exists(fp):
-            self._next_number += 1
-            fp = self._matrix_file(self._next_number)
 
     @staticmethod
     def _get_emmebank(arg):
@@ -383,10 +373,17 @@ class MatrixButler(object):
         return len(self.lookup_numbers(unique_id, squeeze=False)) > 1
 
     def _next_numbers(self, n):
-        numbers = [self._next_number]
-        for _ in range(1, n):
-            self._increment_next_number()
-            numbers.append(self._next_number)
+        sql = "SELECT number FROM matrix_numbers;"
+        existing_numbers = {int(item['number']) for item in list(self._connection.execute(sql))}
+
+        numbers = []
+        cursor = 1
+        for _ in xrange(n):
+            while cursor in existing_numbers:
+                cursor += 1
+            numbers.append(cursor)
+            cursor += 1
+
         return numbers
 
     def _check_lookup(self, unique_id, n, partition):
@@ -677,8 +674,6 @@ class MatrixButler(object):
         WHERE id=?;
         """
         self._connection.execute(sql, [unique_id])
-
-        self._next_number = min(numbers)
 
         if self._committing:
             self._connection.commit()
