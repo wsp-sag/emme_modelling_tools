@@ -525,7 +525,7 @@ class MatrixButler(object):
             return matrix
 
     def save_matrix(self, dataframe_or_mfid, unique_id, description="", type_name="", scenario_id=None, emmebank=None,
-                    fill_eminf=False, n_slices=1, partition=False):
+                    fill_eminf=False, n_slices=1, partition=False, reindex=True, fill_value=0.0):
         """
         Passes a matrix to the butler for safekeeping.
 
@@ -542,6 +542,10 @@ class MatrixButler(object):
                 exporting. Only available if copying from an Emmebank
             n_slices (int): Number of slices (on-disk) for multi-processing.
             partition (bool): Flag whether to partition the matrix before saving, based on self.zone_partition
+            reindex (bool): Flag to indicate if partial matrices are accepted when supplying a DataFrame. If False,
+                AssertionError will be raised when one of the DataFrame's axes doesn't match the Butler's zone system.
+            fill_value (float): The fill value to be used when reindexing (see 'reindex' flag) or filling Emme infinity
+                (see `fill_eminf` flag)
         """
 
         n_slices, partition = self._validate_slice_args(n_slices, partition)
@@ -555,12 +559,15 @@ class MatrixButler(object):
 
             if fill_eminf:
                 mask = (matrix == 1E20) | (matrix == -1E20)
-                np.putmask(matrix, mask, 0.0)
+                np.putmask(matrix, mask, fill_value)
         else:
             if isinstance(dataframe_or_mfid, pd.DataFrame):
-                assert dataframe_or_mfid.index.equals(self._zone_system)
-                assert dataframe_or_mfid.columns.equals(self._zone_system)
-            # TODO: Check that Series index matches the Butler's
+                if not dataframe_or_mfid.index.equals(self._zone_system):
+                    if not reindex: raise AssertionError()
+                    dataframe_or_mfid = dataframe_or_mfid.reindex_axis(self._zone_system, fill_value=fill_value, axis=0)
+                if not dataframe_or_mfid.columns.equals(self._zone_system):
+                    if not reindex: raise AssertionError()
+                    dataframe_or_mfid = dataframe_or_mfid.reindex_axis(self._zone_system, fill_value=fill_value, axis=1)
             matrix = coerce_matrix(dataframe_or_mfid, allow_raw=True, force_square=True)
             assert matrix.shape == (len(self._zone_system),) * 2
 
