@@ -429,13 +429,24 @@ class MatrixButler(object):
 
         return n_slices, partition
 
+    def _expand_matrix(self, matrix, n_slices, partition):
+        if n_slices == 1 and not partition:
+            rows, cols = matrix.shape
+            assert rows == cols
+            padding = self._max_zones_fortran - rows
+            if padding > 0:
+                return expand_array(matrix, padding, axis=None)
+            return matrix
+        else:
+            cols = matrix.shape[1]
+            padding = self._max_zones_fortran - cols
+            if padding > 0:
+                return expand_array(matrix, padding, axis=1)
+        return matrix
+
     def _write_matrix_files(self, matrix, files, partition):
 
-        _, cols = matrix.shape
-        padding = self._max_zones_fortran - cols
-        if padding > 0:
-            # Pad the columns only
-            matrix = expand_array(matrix, padding, axis=1)
+        matrix = self._expand_matrix(matrix, len(files), partition)
 
         remainder, remainder_file = None, None
         if partition:
