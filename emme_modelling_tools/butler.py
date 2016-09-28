@@ -36,6 +36,20 @@ class ButlerOverwriteWarning(RuntimeWarning):
     pass
 
 
+class MatrixEntry(object):
+
+    __slots__ = ['uid', 'description', 'timestamp', 'type_name']
+
+    def __init__(self, *args):
+        self.uid, self.description, self.timestamp, self.type_name = args
+
+    def __repr__(self):
+        return "MatrixEntry('%s')" % self.uid
+
+    def __str__(self):
+        return self.uid
+
+
 class MatrixButler(object):
 
     MATRIX_EXTENSION = 'bin'
@@ -265,6 +279,61 @@ class MatrixButler(object):
         self._max_zones_fortran = fortran_max_zones
 
         self._committing = True
+
+    def __iter__(self):
+        sql = """
+        SELECT *
+        FROM matrices
+        """
+        result = list(self._connection.execute(sql))
+        for item in result:
+            yield MatrixEntry(item['id'], item['description'], item['timestamp'], item['type'])
+
+    def __contains__(self, item):
+        sql = """
+        SELECT id
+        FROM matrices
+        WHERE id=?
+        """
+        result = list(self._connection.execute(sql, item))
+        return len(result) > 0
+
+    def __len__(self):
+        sql = """
+        SELECT *
+        FROM matrices
+        """
+        return len(list(self._connection.execute(sql)))
+
+    def __getitem__(self, item):
+        sql = """
+        SELECT id
+        FROM matrices
+        WHERE id=?
+        """
+        result = list(self._connection.execute(sql, item))
+        if len(result) < 1: raise KeyError(item)
+
+        item = result[0]
+        return MatrixEntry(item['id'], item['description'], item['timestamp'], item['type'])
+
+    def to_frame(self):
+        """
+        Returns a representation of the butler's contents as a pandas.DataFrame
+        """
+        uids, descriptions, timestamps, types = [], [], [], []
+        for entry in self:
+            uids.append(entry.uid)
+            descriptions.append(entry.description)
+            timestamps.append(entry.timestamp)
+            types.append(entry.type_name)
+        df = pd.DataFrame(index=uids)
+        df.index.name = 'uid'
+        df['description'] = descriptions
+        df['timestamp'] = timestamps
+        df['tpe_name'] = types
+
+        return df
 
     @property
     def zone_system(self):
