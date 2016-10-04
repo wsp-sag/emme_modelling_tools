@@ -7,6 +7,8 @@ import shapelib as shp
 import dbflib as dbf
 from os import path
 import os
+from multiprocessing import cpu_count
+from copy import deepcopy
 
 import pandas as pd
 import numpy as np
@@ -558,6 +560,19 @@ def pandas_to_matrix(series_or_dataframe, mtx_out=None, scenario_id=None):
     return md
 
 
+def extract_stopping_criteria(report):
+    stop_crit_name = report['stopping_criterion']
+    final_iter = report['iterations'][-1]
+    if stop_crit_name == 'MAX_ITERATIONS':
+        stop_crit_val = final_iter['number']
+        criterion_name = 'MAX_ITERATIONS'
+    else:
+        criterion_name = stop_crit_name.lower().replace('_gap', '')
+        stop_crit_val = final_iter['gaps'][criterion_name]
+
+    return final_iter['number'], criterion_name, stop_crit_val
+
+
 def parallel_strategy_allowed(logr):
     # Check for Emme 4.3 OR for a test-beta version. By default, if there's a problem, turn off parallel analysis
     try:
@@ -572,3 +587,145 @@ def parallel_strategy_allowed(logr):
         # If there's some error in checking version, leave PARALLEL_ANALYSIS turned off by default
         logr.error("Error checking Emme version: %s" % e)
         return False
+
+
+def _measure_instant_stability(travel_time_matrix, scenario, spec, stopped_at, continue_traffic_assignment):
+    prior_travel_time = travel_time_matrix.get_numpy_data(scenario_id=scenario.id).flatten()
+    prior_link_volumes = load_link_dataframe(scenario).auto_volume
+
+    spec = deepcopy(spec)  # Make a deep copy to avoid side effects
+    spec['stopping_criteria']['max_iterations'] = stopped_at + 1
+    spec['stopping_criteria']['relative_gap'] = 0.0
+
+    with m.logbook_trace("Analyze instant stability"):
+        continue_traffic_assignment(spec, scenario, chart_log_interval=0)
+
+    updated_travel_times = travel_time_matrix.get_numpy_data(scenario_id=scenario.id).flatten()
+    updated_link_volumes = load_link_dataframe(scenario).auto_volume
+
+    time_abs_diff = pd.Series(updated_travel_times - prior_travel_time).abs()  # Need to convert to Series to use describe()
+    vol_abs_diff = (updated_link_volumes - prior_link_volumes).abs()
+
+    return time_abs_diff.describe(), vol_abs_diff.describe()
+
+
+def analyze_traffic_assignment_stability(scenario, demand_matrix, auto_mode, gaps_to_test=None, max_iterations=200,
+                                         n_threads=None):
+    """
+    Performs an analysis of stability of the Standard Traffic Assignment, to assist in determining an optimal gap
+    criterion for modelling. Two kinds of stability are reported: absolute difference in matrix travel times, and
+    absolute difference in link volumes.
+
+    Takes in a monotonically-decreasing list of relative gap values to test. For each gap value tested, this function
+    measures "instantaneous" stability: it runs one additional iteration and measures the difference. Stability is
+    measured for auto volumes on links, and for origin-to-destination travel times (matrix).
+
+
+    Args:
+        scenario (Scenario): The scenario in which to run the test. Existing assignment results will be overwritten
+        demand_matrix (str or Matrix): The demand matrix to assign to the scenario.
+        auto_mode (str or Mode): The auto mode to assign.
+        gaps_to_test (None or List): The list of relative gap values to test. Must be monotonically decreasing and
+            have at least one value. If not provided, will default to [0.1, 0.05, 0.01, 0.005, 0.001, 0.0005, 0.0001]
+        max_iterations (int): A cap on the maximum number of iterations overall. This may be reached before testing all
+            of the gaps, in which case only results from the gaps tested will be returned.
+        n_threads (int): Number of threads to use in the assignment. If not provided, the results from
+            multiprocessing.cpu_cunt() will be used.
+
+    Returns (tuple):
+        - iterations (pd.Series). The index is the gap value that was tested. The values are the number of iterations
+            needed to reach that gap.
+        - time_stability (pd.DataFrame): Each column is a tested gap value. The index is the same as Series.describe(),
+            and the values are based on statistical analyses of the instantaneous change in OD travel time.
+        - link_stability (pd.DataFrame): Each column is a tested gap value. The index is the same as Series.describe(),
+            and the values are based on statistical analyses of the instantaneous change in link volume.
+
+    """
+    run_traffic_assignment = mm.tool('inro.emme.traffic_assignment.standard_traffic_assignment')
+    continue_traffic_assignment = mm.tool('inro.emme.traffic_assignment.continue_traffic_assignment')
+    if gaps_to_test is None:
+        gaps_to_test = [0.1, 0.05, 0.01, 0.005, 0.001, 0.0005, 0.0001]
+    assert pd.Index(gaps_to_test).is_monotonic_decreasing, "Gaps to test MUST be monotonically decreasing!"
+
+    n_threads = cpu_count() if n_threads is None else int(n_threads)
+    auto_mode = str(auto_mode)
+    demand_matrix = str(demand_matrix)
+
+    with temporary_matrices(1, id=False) as auto_time_matrix, m.logbook_trace("Stability analysis"):
+        iterator = iter(gaps_to_test)
+        gap = iterator.next()
+        spec = {
+            "type": "STANDARD_TRAFFIC_ASSIGNMENT",
+            "classes": [
+                {
+                    "mode": auto_mode,
+                    "demand": demand_matrix,
+                    "generalized_cost": None,
+                    "results": {
+                        "link_volumes": None,
+                        "turn_volumes": None,
+                        "od_travel_times": {
+                            "shortest_paths": auto_time_matrix.id
+                        }
+                    },
+                    "analysis": {
+                        "analyzed_demand": None,
+                        "results": {
+                            "od_values": None,
+                            "selected_link_volumes": None,
+                            "selected_turn_volumes": None
+                        }
+                    }
+                }
+            ],
+            "performance_settings": {
+                "number_of_processors": n_threads
+            },
+            "background_traffic": None,
+            "path_analysis": None,
+            "cutoff_analysis": None,
+            "traversal_analysis": None,
+            "stopping_criteria": {
+                "max_iterations": max_iterations,
+                "relative_gap": gap,
+                "best_relative_gap": 0,
+                "normalized_gap": 0
+            }
+        }
+
+        print "Testing gap %s" % gap
+        report = run_traffic_assignment(spec, scenario=scenario, chart_log_interval=0)
+        stopped_at, criterion, _ = extract_stopping_criteria(report)
+        iters = {gap: stopped_at}
+
+        # Prepare the spec to be used from now on for continued traffic assignment
+        spec = {
+            'type': "CONTINUE_STANDARD_TRAFFIC_ASSIGNMENT",
+            'stopping_criteria': spec['stopping_criteria'],
+            'performance_settings': spec['performance_settings']
+        }
+        instant_time_stability, instant_volume_stability = _measure_instant_stability(
+            auto_time_matrix, scenario, spec, stopped_at, continue_traffic_assignment
+        )
+        time_tability = pd.DataFrame({gap: instant_time_stability})
+        volume_stability = pd.DataFrame({gap: instant_volume_stability})
+
+        for gap in iterator:
+            if criterion == 'MAX_ITERATIONS':
+                print "Reached maximum iterations of %s" % max_iterations
+                break
+            spec['stopping_criteria']['relative_gap'] = gap
+
+            print "Testing gap %s" % gap
+            report = continue_traffic_assignment(spec, scenario=scenario, chart_log_interval=0)
+            stopped_at, criterion, _ = extract_stopping_criteria(report)
+            iters[gap] = stopped_at
+
+            instant_time_stability, instant_volume_stability = _measure_instant_stability(
+                auto_time_matrix, scenario, spec, stopped_at, continue_traffic_assignment
+            )
+            time_tability[gap] = instant_time_stability
+            volume_stability[gap] = instant_volume_stability
+
+        iters = pd.Series(iters)
+        return iters, time_tability, volume_stability
