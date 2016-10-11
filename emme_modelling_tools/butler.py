@@ -295,7 +295,7 @@ class MatrixButler(object):
         FROM matrices
         WHERE id=?
         """
-        result = list(self._connection.execute(sql, item))
+        result = list(self._connection.execute(sql, [item]))
         return len(result) > 0
 
     def __len__(self):
@@ -311,7 +311,7 @@ class MatrixButler(object):
         FROM matrices
         WHERE id=?
         """
-        result = list(self._connection.execute(sql, item))
+        result = list(self._connection.execute(sql, [item]))
         if len(result) < 1: raise KeyError(item)
 
         item = result[0]
