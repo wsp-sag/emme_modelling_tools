@@ -706,7 +706,8 @@ class MatrixButler(object):
             partition (bool): Flag whether to partition the matrix before saving, based on self.zone_partition
         """
         prior_n_slices = len(self.lookup_numbers(unique_id, squeeze=False))
-        if prior_n_slices == n_slices: return  # Do nothing if already sliced to the called number
+        expected_slices = n_slices + 1 if partition else n_slices
+        if prior_n_slices == expected_slices: return  # Do nothing if already sliced to the called number
 
         n_slices, partition = self._validate_slice_args(n_slices, partition)
 
