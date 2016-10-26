@@ -547,12 +547,22 @@ def pandas_to_matrix(series_or_dataframe, mtx_out=None, scenario_id=None):
     if isinstance(series_or_dataframe, pd.Series):
         indices = list(series_or_dataframe.index.values)
         md = MatrixData(indices)
-        md.from_numpy(series_or_dataframe.values)
+
+        array = series_or_dataframe.values
+        if array.flags.f_contiguous:
+            array = np.ascontiguousarray(array)
+
+        md.from_numpy(array)
     elif isinstance(series_or_dataframe, pd.DataFrame):
         indices = list(series_or_dataframe.index.values), list(series_or_dataframe.columns.values)
         md = MatrixData(indices)
-        md.from_numpy(series_or_dataframe.values)
-    else: raise TypeError("Expected a Series or DataFrame, got %s" %type(series_or_dataframe))
+
+        array = series_or_dataframe.values
+        if array.flags.f_contiguous:
+            array = np.ascontiguousarray(array)
+
+        md.from_numpy(array)
+    else: raise TypeError("Expected a Series or DataFrame, got %s" % type(series_or_dataframe))
 
     if mtx_out is not None:
         mtx_out.set_data(md, scenario_id=scenario_id)
