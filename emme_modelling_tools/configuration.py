@@ -18,21 +18,29 @@ def is_name_pythonic(name):
     return not UNPYTHONIC_REGEX.match(name) or name in kwlist
 
 
-def load_commented_json(filepath, **kwargs):
+def load_commented_json(reader, **kwargs):
+    if isinstance(reader, basestring):
+        with open(reader) as file_:
+            parsed = _parse_comments(file_)
+    else:
+        parsed = _parse_comments(reader)
+
+    return json.loads(parsed, **kwargs)
+
+
+def _parse_comments(reader):
     regex = r'\s*(#|\/{2}).*$'
     regex_inline = r'(:?(?:\s)*([A-Za-z\d\.{}]*)|((?<=\").*\"),?)(?:\s)*(((#|(\/{2})).*)|)$'
 
     pipe = []
-    with open(filepath) as reader:
-        for line in reader:
-            if re.search(regex, line):
-                if re.search(r'^' + regex, line, re.IGNORECASE): continue
-                elif re.search(regex_inline, line):
-                    pipe.append(re.sub(regex_inline, r'\1', line))
-            else:
-                pipe.append(line)
-
-    return json.loads("\n".join(pipe), **kwargs)
+    for line in reader:
+        if re.search(regex, line):
+            if re.search(r'^' + regex, line, re.IGNORECASE): continue
+            elif re.search(regex_inline, line):
+                pipe.append(re.sub(regex_inline, r'\1', line))
+        else:
+            pipe.append(line)
+    return  "\n".join(pipe)
 
 
 class ConfigParseError(IOError):
