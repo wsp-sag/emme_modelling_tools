@@ -4,6 +4,7 @@ import re
 import os
 from collections import OrderedDict
 from keyword import kwlist
+from StringIO import StringIO
 
 special_chars = set(r" .,<>/?;:'|[{]}=+-)(*&^%$#@!`~" + '"')
 regex_chars = set(r"]")
@@ -58,6 +59,16 @@ class Config(object):
         dict_ = load_commented_json(fp, object_pairs_hook=OrderedDict)
         root_name, _ = os.path.splitext(os.path.basename(fp))
         return Config(dict_, file=fp, name=root_name)
+
+    @staticmethod
+    def fromstring(s, file_name='<from_str>', root_name='<root>'):
+        sio = StringIO(s)
+        dict_ = load_commented_json(sio, object_pairs_hook=OrderedDict)
+        return Config(dict_, file=file_name, name=root_name)
+
+    @staticmethod
+    def fromdict(dict_, file_name='<from_dict>', root_name='<root>'):
+        return Config(dict_, file=file_name, name=root_name)
 
     def __init__(self, config_dict, name=None, parent=None, file=None):
         self._d = OrderedDict()
