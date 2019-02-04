@@ -150,4 +150,4 @@ class Config(object):
     def tofile(self, fp):
         dict_ = self.serialize()
         with open(fp, 'w') as writer:
-            json.dump(dict_, writer, indent=2)
+            json.dump(dict_, writer, sort_keys=True, indent=2)
