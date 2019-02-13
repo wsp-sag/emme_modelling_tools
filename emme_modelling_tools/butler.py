@@ -331,7 +331,7 @@ class MatrixButler(object):
         df.index.name = 'uid'
         df['description'] = descriptions
         df['timestamp'] = timestamps
-        df['tpe_name'] = types
+        df['type'] = types
 
         return df
 
