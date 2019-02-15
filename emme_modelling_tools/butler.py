@@ -1,7 +1,6 @@
 from __future__ import division
 
 import os
-from os import path
 import shutil
 import sqlite3 as sqlite
 from datetime import datetime as dt
@@ -10,13 +9,21 @@ from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
+import inro.modeller as m
 
 from ..matrix_converters import from_fortran_rectangle, to_fortran
 from ..matrix_converters.matrix_converters.common import expand_array, coerce_matrix
 
 try:
-    import inro.modeller as m
-    mm = m.Modeller()
+    try:
+        mm = m.Modeller()
+    except:
+        if 'GGHM_SPHINX_EMP' in os.environ:  # Start an Emme instance to allow Sphinx to autodoc module
+            from inro.emme.desktop.app import start_dedicated
+            app = start_dedicated(project=os.environ['GGHM_SPHINX_EMP'], visible=False, user_initials='doc')
+            mm = m.Modeller(app)
+        else:
+            raise AssertionError
     project_emmebank = mm.emmebank
     del mm, m
     from emme_utils import matrix_to_pandas, pandas_to_matrix
@@ -63,17 +70,17 @@ class MatrixButler(object):
         version (which does).
 
         Args:
-            parenty_directory (str): Filepath to the parent folder of the butler. Same argument as is passed to connect()
-             or create()
+            parenty_directory (str): Filepath to the parent folder of the butler. Same argument as is passed to
+                connect() or create()
             keep_backup (bool): If true, a backup copy will be made before modifications begin.
 
         """
         warn(ButlerOverwriteWarning("Converting an old MatrixButler is a one-way operation."))
 
-        db_path = path.join(parenty_directory, MatrixButler.SUBDIRECTORY_NAME, MatrixButler.DB_NAME)
+        db_path = os.path.join(parenty_directory, MatrixButler.SUBDIRECTORY_NAME, MatrixButler.DB_NAME)
 
         if keep_backup:
-            backup_path = path.join(parenty_directory, MatrixButler.SUBDIRECTORY_NAME, "matrix_directory_backup.sqlite")
+            backup_path = os.path.join(parenty_directory, MatrixButler.SUBDIRECTORY_NAME, "matrix_directory_backup.sqlite")
             shutil.copy(db_path, backup_path)
 
         connection = sqlite.connect(db_path)
@@ -134,14 +141,14 @@ class MatrixButler(object):
         zone_system = pd.Int64Index(zone_system)
         fortran_max_zones = int(fortran_max_zones)
 
-        butler_path = path.join(parent_directory, MatrixButler.SUBDIRECTORY_NAME)
+        butler_path = os.path.join(parent_directory, MatrixButler.SUBDIRECTORY_NAME)
 
-        if not path.exists(butler_path):
+        if not os.path.exists(butler_path):
             os.makedirs(butler_path)
 
-        dbfile = path.join(butler_path, MatrixButler.DB_NAME)
-        db_exists = path.exists(dbfile)  # Connecting to a non-existent file will create the file, so cache this first
-        db = sqlite.connect(dbfile)
+        db_file = os.path.join(butler_path, MatrixButler.DB_NAME)
+        db_exists = os.path.exists(db_file)  # Connecting to a non-existent file will create the file, so cache first
+        db = sqlite.connect(db_file)
         db.row_factory = sqlite.Row
 
         if db_exists:
@@ -154,7 +161,7 @@ class MatrixButler(object):
 
                 for fn in os.listdir(butler_path):
                     if fn.endswith(MatrixButler.MATRIX_EXTENSION):
-                        fp = path.join(butler_path, fn)
+                        fp = os.path.join(butler_path, fn)
                         os.remove(fp)
                 MatrixButler._clear_tables(db)
                 MatrixButler._create_tables(db, zone_system, fortran_max_zones)
@@ -238,11 +245,11 @@ class MatrixButler(object):
             IOError if a MatrixButler cannot be found at the given parent directory.
 
         """
-        butler_path = path.join(parent_directory, MatrixButler.SUBDIRECTORY_NAME)
+        butler_path = os.path.join(parent_directory, MatrixButler.SUBDIRECTORY_NAME)
         if not os.path.exists(butler_path):
             raise IOError("No matrix butler found at '%s'" % parent_directory)
 
-        dbfile = path.join(butler_path, MatrixButler.DB_NAME)
+        dbfile = os.path.join(butler_path, MatrixButler.DB_NAME)
         if not os.path.exists(dbfile):
             raise IOError("No matrix butler found at '%s'" % parent_directory)
 
@@ -366,7 +373,7 @@ class MatrixButler(object):
             self._connection.commit()
 
     def _matrix_file(self, n):
-        return path.join(self._path, "mf%s.%s" % (n, self.MATRIX_EXTENSION))
+        return os.path.join(self._path, "mf%s.%s" % (n, self.MATRIX_EXTENSION))
 
     @staticmethod
     def _get_emmebank(arg):

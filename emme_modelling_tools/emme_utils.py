@@ -1,28 +1,33 @@
 from __future__ import division
 
+import os
 from contextlib import contextmanager
+from multiprocessing import cpu_count
+from copy import deepcopy
 
 from shapely.geometry import Point, LineString, Polygon
 import shapelib as shp
 import dbflib as dbf
-from os import path
-import os
-from multiprocessing import cpu_count
-from copy import deepcopy
 
 import pandas as pd
 import numpy as np
-
 from inro.emme.matrix import MatrixData
 from inro.emme.core.exception import ProtectionError, CapacityError
 import inro.modeller as m
-mm = m.Modeller()
-project_emmebank = mm.emmebank
+
+try:
+    mm = m.Modeller()
+except:
+    if 'GGHM_SPHINX_EMP' in os.environ:  # Start an Emme instance to allow Sphinx to autodoc module
+        from inro.emme.desktop.app import start_dedicated
+        app = start_dedicated(project=os.environ['GGHM_SPHINX_EMP'], visible=False, user_initials='doc')
+        mm = m.Modeller(app)
+    else:
+        raise
 
 
 def init_matrix(mtx_id=None,  matrix_type="FULL", default=0.0, name="", description="", log=True):
-    """
-    "Safe" initialization of a matrix either creates (if new) or initializes a matrix in the Emmebank.
+    """Safe initialization of a matrix either creates (if new) or initializes a matrix in the Emmebank.
 
     Args:
         mtx_id (str or None): A valid matrix identifier, or None to get the next available new matrix. If None,
@@ -35,9 +40,9 @@ def init_matrix(mtx_id=None,  matrix_type="FULL", default=0.0, name="", descript
         log (bool): Set to False to disable reporting to Logbook.
 
     Returns:
-        A Matrix instance representing the new or initialized matrix.
-
+        Matrix: A Matrix instance representing the new or initialized matrix.
     """
+
     embank = mm.emmebank
 
     if mtx_id is None:
@@ -65,13 +70,12 @@ def init_matrix(mtx_id=None,  matrix_type="FULL", default=0.0, name="", descript
 
 @contextmanager
 def temporary_matrices(matrices=1, matrix_type='FULL', emmebank=None, log=False, id=False, squeeze=True):
-    """
-    Context manager to create multiple temporary matrices
+    """Context manager to create multiple temporary matrices
 
     Args:
         matrix_type:
-        matrices (int or Iterable): If integer, describes how many temporary matrices will be created. If an
-            Iterable, each item will be taken as a matrix description.
+        matrices (int or Iterable): If integer, describes how many temporary matrices will be created. If an Iterable,
+            each item will be taken as a matrix description.
         emmebank (Emmebank or None): The Emmebank object in which to create the matrices. Set to None to use the
             current Emmebank.
         log (bool): Set to True to record each temporary matrix creation to the Logbook.
@@ -80,10 +84,10 @@ def temporary_matrices(matrices=1, matrix_type='FULL', emmebank=None, log=False,
             is requested.
 
     Returns:
-        basestring or Matrix, depending on the value of `id`.
-
+        basestring or Matrix: depending on the value of `id`.
     """
-    emmebank = project_emmebank if emmebank is None else emmebank
+
+    emmebank = mm.emmebank if emmebank is None else emmebank
 
     try:
         descriptors = list(matrices)
@@ -108,8 +112,7 @@ def temporary_matrices(matrices=1, matrix_type='FULL', emmebank=None, log=False,
 
 
 def init_extra_attribute(scenario, exatt_id, domain='LINK', default=0, description=''):
-    """
-    Initializes an extra attribute to a default value, creating it if it doesn't exist.
+    """Initializes an extra attribute to a default value, creating it if it doesn't exist.
 
     Args:
         scenario:
@@ -117,10 +120,8 @@ def init_extra_attribute(scenario, exatt_id, domain='LINK', default=0, descripti
         domain:
         default:
         description:
-
-    Returns:
-
     """
+
     exatt = scenario.extra_attribute(exatt_id)
     if exatt is None:
         exatt = scenario.create_extra_attribute(domain, exatt_id, default)
@@ -129,18 +130,16 @@ def init_extra_attribute(scenario, exatt_id, domain='LINK', default=0, descripti
 
 
 def next_available_scenario(emmebank):
-    """
-    Finds the next available scenario number for a given Emmebank.
+    """Finds the next available scenario number for a given Emmebank.
 
     Args:
-        emmebank (Emmebank instance): The Emmebank to query.
+        emmebank (Emmebank): The Emmebank to query.
 
     Returns:
-        int - The number of the next available scenario
+        int: The number of the next available scenario
 
     Raises:
-        CapacityError if the Emmebanmk is full.
-
+        CapacityError: if the Emmebanmk is full.
     """
 
     for i in range(1, emmebank.dimensions['scenarios'] + 1):
@@ -177,23 +176,23 @@ class ShapelyGeometry(object):
 
 
 def _make_geom(record):
-    shapetype = record.type
-    if shapetype == shp.SHPT_POINT:
+    shape_type = record.type
+    if shape_type == shp.SHPT_POINT:
         return Point(record.vertices()[0])
-    if shapetype == shp.SHPT_ARC:
+    if shape_type == shp.SHPT_ARC:
         return LineString(record.vertices()[0])
-    if shapetype == shp.SHPT_POLYGON:
+    if shape_type == shp.SHPT_POLYGON:
         v = record.vertices()
         shell = v[0]
         holes = v[1:]
         return Polygon(shell, holes)
-    raise RuntimeError("Unrecognized shape type %s" % shapetype)
+    raise RuntimeError("Unrecognized shape type %s" % shape_type)
 
 
 def read_shapefile(fp, heal=True):
-    """
-    Reads an ESRI Shapeifle and converts it to Shapely Geometry objects. The DBF is also read and each returned geometry
-    has its DBF attributes attached.
+    """Reads an ESRI Shapefile and converts it to Shapely Geometry objects.
+
+    The DBF is also read and each returned geometry has its DBF attributes attached.
 
     Examples:
         points = read_shapefile("airports.shp")
@@ -212,48 +211,47 @@ def read_shapefile(fp, heal=True):
         List of ShapelyGeometry objects
 
     """
-    basepath, _ = path.splitext(fp)
-    shp_path = basepath + ".shp"
-    dbf_path = basepath + ".dbf"
+    base_path, _ = os.path.splitext(fp)
+    shp_path = base_path + ".shp"
+    dbf_path = base_path + ".dbf"
 
-    shapefile = shp.open(shp_path)
+    shp_file = shp.open(shp_path)
     try:
-        shp_length, shp_type, x_extents, y_extents = shapefile.info()
-        tablefile = dbf.open(dbf_path)
+        shp_length, shp_type, x_extents, y_extents = shp_file.info()
+        dbf_file = dbf.open(dbf_path)
     except:
-        shapefile.close()
+        shp_file.close()
         raise
 
     try:
         geoms = []
-        assert shp_length == tablefile.record_count()
+        assert shp_length == dbf_file.record_count()
         for fid in xrange(shp_length):
-            record = shapefile.read_object(fid)
+            record = shp_file.read_object(fid)
             geom = _make_geom(record)
             if not geom.is_valid and heal:
                 geom = geom.buffer(0)
 
-            attrs = tablefile.read_record(fid)
+            attrs = dbf_file.read_record(fid)
 
             geoms.append(ShapelyGeometry(geom, attrs))
         return geoms
     finally:
-        shapefile.close()
-        tablefile.close()
+        shp_file.close()
+        dbf_file.close()
 
 
 def load_node_dataframe(scenario, pythonize_exatts=False):
-    """
-    Creates a table for node attributes in a scenario.
+    """Creates a table for node attributes in a scenario.
 
     Args:
         scenario: An instance of inro.emme.scenario.Scenario
-        pythonize_exatts: Flag to make extra attribute names 'Pythonic'. If set
-            to True, then "@stn1" will become "x_stn1".
+        pythonize_exatts: Flag to make extra attribute names 'Pythonic'. If set to True, then "@stn1" will become "x_stn1".
 
     Returns:
-
+        DataFrame
     """
+
     attr_list = scenario.attributes("NODE")
     package = scenario.get_attribute_values("NODE", attr_list)
 
@@ -276,16 +274,14 @@ def load_node_dataframe(scenario, pythonize_exatts=False):
 
 
 def load_link_dataframe(scenario, pythonize_exatts=False):
-    """
-    Creates a table for link attributes in a scenario.
+    """Creates a table for link attributes in a scenario.
 
     Args:
         scenario: An instance of inro.emme.scenario.Scenario
-        pythonize_exatts: Flag to make extra attribute names 'Pythonic'. If set
-            to True, then "@stn1" will become "x_stn1".
+        pythonize_exatts: Flag to make extra attribute names 'Pythonic'. If set to True, then "@stn1" will become "x_stn1".
 
-    Returns: pandas.DataFrame
-
+    Returns:
+        DataFrame
     """
     attr_list = scenario.attributes('LINK')
     if "vertices" in attr_list: attr_list.remove("vertices")
@@ -297,7 +293,7 @@ def load_link_dataframe(scenario, pythonize_exatts=False):
     link_indexer = {}
     for i, outgoing_data in data_positions.iteritems():
         for j, pos in outgoing_data.iteritems():
-            link_indexer[(i,j)] = pos
+            link_indexer[(i, j)] = pos
     link_indexer = pd.Series(link_indexer)
     link_indexer.index.names = 'i j'.split()
 
@@ -314,17 +310,16 @@ def load_link_dataframe(scenario, pythonize_exatts=False):
 
 
 def load_turn_dataframe(scenario, pythonize_exatts=False):
-    """
-    Creates a table for turn attributes in a scenario.
+    """Creates a table for turn attributes in a scenario.
 
     Args:
         scenario: An instance of inro.emme.scenario.Scenario
-        pythonize_exatts: Flag to make extra attribute names 'Pythonic'. If set
-            to True, then "@stn1" will become "x_stn1".
+        pythonize_exatts: Flag to make extra attribute names 'Pythonic'. If set to True, then "@stn1" will become "x_stn1".
 
     Returns:
-
+        DataFrame
     """
+
     attr_list = scenario.attributes("TURN")
     package = scenario.get_attribute_values("TURN", attr_list)
 
@@ -334,7 +329,7 @@ def load_turn_dataframe(scenario, pythonize_exatts=False):
     turn_indexer = {}
     for (i, j), outgoing_data in index_data.iteritems():
         for k, pos in outgoing_data.iteritems():
-            turn_indexer[(i,j,k)] = pos
+            turn_indexer[(i, j, k)] = pos
     turn_indexer = pd.Series(turn_indexer)
     turn_indexer.index.names = "i j k".split()
 
@@ -351,17 +346,16 @@ def load_turn_dataframe(scenario, pythonize_exatts=False):
 
 
 def load_transit_line_dataframe(scenario, pythonize_exatts=False):
-    """
-    Creates a table for transit line attributes in a scenario.
+    """Creates a table for transit line attributes in a scenario.
 
     Args:
         scenario: An instance of inro.emme.scenario.Scenario
-        pythonize_exatts: Flag to make extra attribute names 'Pythonic'. If set
-            to True, then "@stn1" will become "x_stn1".
+        pythonize_exatts: Flag to make extra attribute names 'Pythonic'. If set to True, then "@stn1" will become "x_stn1".
 
     Returns:
-
+        DataFrame
     """
+
     attr_list = scenario.attributes("TRANSIT_LINE")
     package = scenario.get_attribute_values("TRANSIT_LINE", attr_list)
 
@@ -382,17 +376,16 @@ def load_transit_line_dataframe(scenario, pythonize_exatts=False):
 
 
 def load_transit_segment_dataframe(scenario, pythonize_exatts=False):
-    """
-    Creates a table for transit segment attributes in a scenario.
+    """Creates a table for transit segment attributes in a scenario.
 
     Args:
         scenario: An instance of inro.emme.scenario.Scenario
-        pythonize_exatts: Flag to make extra attribute names 'Pythonic'. If set
-            to True, then "@stn1" will become "x_stn1".
+        pythonize_exatts: Flag to make extra attribute names 'Pythonic'. If set to True, then "@stn1" will become "x_stn1".
 
     Returns:
-
+        DataFrame
     """
+
     attr_list = scenario.attributes("TRANSIT_SEGMENT")
     package = scenario.get_attribute_values("TRANSIT_SEGMENT", attr_list)
 
@@ -402,9 +395,9 @@ def load_transit_segment_dataframe(scenario, pythonize_exatts=False):
     segment_indexer = {}
     for line, segment_data in index_data.iteritems():
         for tupl, pos in segment_data.iteritems():
-            if len(tupl) == 3: i,j, loop = tupl
+            if len(tupl) == 3: i, j, loop = tupl
             else:
-                i,j = tupl
+                i, j = tupl
                 loop = 0
 
             segment_indexer[(line, i, j, loop)] = pos
@@ -424,19 +417,18 @@ def load_transit_segment_dataframe(scenario, pythonize_exatts=False):
 
 
 def split_zone_in_matrix(base_matrix, old_zone, new_zones, proportions):
-    """
-    Takes a zone in a matrix (represented as a DataFrame) and splits it into several new zones,
-    prorating affected cells by a vector of proportions (one value for each new zone). The old
-    zone is removed.
+    """Takes a zone in a matrix (represented as a DataFrame) and splits it into several new zones, prorating affected
+    cells by a vector of proportions (one value for each new zone). The old zone is removed.
 
     Args:
         base_matrix: The matrix to re-shape, as a DataFrame
         old_zone: Integer number of the original zone to split
         new_zones: List of integers of the new zones to add
-        proportions: List of floats of proportions to split the original zone to. Must be the same
-            length as `new_zones` and sum to 1.0
+        proportions: List of floats of proportions to split the original zone to. Must be the same length as `new_zones`
+            and sum to 1.0
 
-    Returns: Re-shaped DataFrame
+    Returns:
+        DataFrame
     """
 
     assert isinstance(base_matrix, pd.DataFrame), "Base matrix must be a DataFrame"
@@ -466,7 +458,7 @@ def split_zone_in_matrix(base_matrix, old_zone, new_zones, proportions):
     # This section (and the next) works with the underlying Numpy arrays, since they handle
     # broadcasting better than Pandas does
     original_row = base_matrix.loc[old_zone, intersection_index]
-    original_row = original_row.values[:] # Make a shallow copy to preserve shape of the original data
+    original_row = original_row.values[:]  # Make a shallow copy to preserve shape of the original data
     original_row.shape = 1, len(intersection_index)
     proportions.shape = n_new_zones, 1
     result = pd.DataFrame(original_row * proportions, index=new_zones, columns=intersection_index)
@@ -481,7 +473,7 @@ def split_zone_in_matrix(base_matrix, old_zone, new_zones, proportions):
     new_matrix.loc[result.index, result.columns] = result
 
     # 4. Expand the old intrazonal
-    proportions_copy = proportions[:,:]
+    proportions_copy = proportions[:, :]
     proportions_copy.shape = 1, n_new_zones
     proportions.shape = n_new_zones, 1
 
@@ -495,21 +487,22 @@ def split_zone_in_matrix(base_matrix, old_zone, new_zones, proportions):
 
 
 def matrix_to_pandas(mtx, scenario_id=None):
-    """
-    Converts Emme Matrix objects to Pandas Series or DataFrames. Origin and Destination matrices will be
-    converted to Series, while Full matrices will be converted to DataFrames. Scalar matrices are unsupported.
+    """Converts Emme Matrix objects to Pandas Series or DataFrames. Origin and Destination matrices will be converted to
+    Series, while Full matrices will be converted to DataFrames. Scalar matrices are unsupported.
 
     Args:
         mtx: Either a Matrix object or a MatrixData object
         scenario_id: Int, optional. Must be provided if a `mtx` is a Matrix object.
 
-    Returns: Series or DataFrame, depending on the type of matrix.
-
+    Returns:
+        Series or DataFrame: depending on the type of matrix.
     """
-    if hasattr(mtx, 'prefix'): # Duck typing check for Matrix object rather than Matrix Data
+
+    if hasattr(mtx, 'prefix'):  # Duck typing check for Matrix object rather than Matrix Data
         assert mtx.type != 'SCALAR', "Scalar matrices cannot be converted to DataFrames"
         md = mtx.get_data(scenario_id)
-    else: md = mtx
+    else:
+        md = mtx
 
     zones_tupl = md.indices
     if len(zones_tupl) == 1:
@@ -531,8 +524,7 @@ def matrix_to_pandas(mtx, scenario_id=None):
 
 
 def pandas_to_matrix(series_or_dataframe, mtx_out=None, scenario_id=None):
-    """
-    Converts a Series or DataFrame to an Emme Matrix; either as a MatrixData instance or saved to a Matrix instance.
+    """Converts a Series or DataFrame to an Emme Matrix; either as a MatrixData instance or saved to a Matrix instance.
 
     Args:
         series_or_dataframe: The Series or DataFrame to convert.
@@ -541,8 +533,7 @@ def pandas_to_matrix(series_or_dataframe, mtx_out=None, scenario_id=None):
         scenario_id: Optional scenario ID to pass to Matrix.set_data()
 
     Returns:
-        MatrixData if `mtx_out` is None; None otherwise.
-
+        MatrixData or None: if `mtx_out` is None; None otherwise.
     """
     if isinstance(series_or_dataframe, pd.Series):
         indices = list(series_or_dataframe.index.values)
@@ -562,7 +553,8 @@ def pandas_to_matrix(series_or_dataframe, mtx_out=None, scenario_id=None):
             array = np.ascontiguousarray(array)
 
         md.from_numpy(array)
-    else: raise TypeError("Expected a Series or DataFrame, got %s" % type(series_or_dataframe))
+    else:
+        raise TypeError("Expected a Series or DataFrame, got %s" % type(series_or_dataframe))
 
     if mtx_out is not None:
         mtx_out.set_data(md, scenario_id=scenario_id)
@@ -587,10 +579,10 @@ def parallel_strategy_allowed(logr):
     # Check for Emme 4.3 OR for a test-beta version. By default, if there's a problem, turn off parallel analysis
     try:
         if os.environ['EMMEPATH'].endswith('Emme-test-160811'):
-            logr.warn("Detected test version of Emme base on EMMEPATH environmental variable. Turning on parallel analysis, "
-                      "but be aware that this check may not be future-proof")
+            logr.warn("Detected test version of Emme base on EMMEPATH environmental variable. Turning on parallel"
+                      "analysis, but be aware that this check may not be future-proof")
             return True
-        elif mm.desktop.version_info >= (4,3):
+        elif mm.desktop.version_info >= (4, 3):
             logr.warn("Emme 4.3 detected. Turning on parallel analysis")
             return True
     except Exception as e:
@@ -613,16 +605,15 @@ def _measure_instant_stability(travel_time_matrix, scenario, spec, stopped_at, c
     updated_travel_times = travel_time_matrix.get_numpy_data(scenario_id=scenario.id).flatten()
     updated_link_volumes = load_link_dataframe(scenario).auto_volume
 
-    time_abs_diff = pd.Series(updated_travel_times - prior_travel_time).abs()  # Need to convert to Series to use describe()
+    time_abs_diff = pd.Series(updated_travel_times - prior_travel_time).abs()
     vol_abs_diff = (updated_link_volumes - prior_link_volumes).abs()
 
-    return time_abs_diff.describe(), vol_abs_diff.describe()
+    return time_abs_diff.describe(), vol_abs_diff.describe()  # Need to convert to Series to use describe()
 
 
 def analyze_traffic_assignment_stability(scenario, demand_matrix, auto_mode, gaps_to_test=None, max_iterations=200,
                                          n_threads=None):
-    """
-    Performs an analysis of stability of the Standard Traffic Assignment, to assist in determining an optimal gap
+    """Performs an analysis of stability of the Standard Traffic Assignment, to assist in determining an optimal gap
     criterion for modelling. Two kinds of stability are reported: absolute difference in matrix travel times, and
     absolute difference in link volumes.
 
@@ -642,15 +633,15 @@ def analyze_traffic_assignment_stability(scenario, demand_matrix, auto_mode, gap
         n_threads (int): Number of threads to use in the assignment. If not provided, the results from
             multiprocessing.cpu_cunt() will be used.
 
-    Returns (tuple):
-        - iterations (pd.Series). The index is the gap value that was tested. The values are the number of iterations
+    Returns:
+        iterations (Series): The index is the gap value that was tested. The values are the number of iterations
             needed to reach that gap.
-        - time_stability (pd.DataFrame): Each column is a tested gap value. The index is the same as Series.describe(),
+        time_stability (DataFrame): Each column is a tested gap value. The index is the same as Series.describe(),
             and the values are based on statistical analyses of the instantaneous change in OD travel time.
-        - link_stability (pd.DataFrame): Each column is a tested gap value. The index is the same as Series.describe(),
+        link_stability (DataFrame): Each column is a tested gap value. The index is the same as Series.describe(),
             and the values are based on statistical analyses of the instantaneous change in link volume.
-
     """
+
     run_traffic_assignment = mm.tool('inro.emme.traffic_assignment.standard_traffic_assignment')
     continue_traffic_assignment = mm.tool('inro.emme.traffic_assignment.continue_traffic_assignment')
     if gaps_to_test is None:
@@ -717,7 +708,7 @@ def analyze_traffic_assignment_stability(scenario, demand_matrix, auto_mode, gap
         instant_time_stability, instant_volume_stability = _measure_instant_stability(
             auto_time_matrix, scenario, spec, stopped_at, continue_traffic_assignment
         )
-        time_tability = pd.DataFrame({gap: instant_time_stability})
+        time_stability = pd.DataFrame({gap: instant_time_stability})
         volume_stability = pd.DataFrame({gap: instant_volume_stability})
 
         for gap in iterator:
@@ -734,8 +725,8 @@ def analyze_traffic_assignment_stability(scenario, demand_matrix, auto_mode, gap
             instant_time_stability, instant_volume_stability = _measure_instant_stability(
                 auto_time_matrix, scenario, spec, stopped_at, continue_traffic_assignment
             )
-            time_tability[gap] = instant_time_stability
+            time_stability[gap] = instant_time_stability
             volume_stability[gap] = instant_volume_stability
 
         iters = pd.Series(iters)
-        return iters, time_tability, volume_stability
+        return iters, time_stability, volume_stability
