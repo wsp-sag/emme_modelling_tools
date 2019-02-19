@@ -1,9 +1,10 @@
 from __future__ import division
-import json
-import re
-import os
+
 from collections import OrderedDict
+import json
 from keyword import kwlist
+import os
+import re
 from StringIO import StringIO
 
 special_chars = set(r" .,<>/?;:'|[{]}=+-)(*&^%$#@!`~" + '"')
@@ -36,12 +37,13 @@ def _parse_comments(reader):
     pipe = []
     for line in reader:
         if re.search(regex, line):
-            if re.search(r'^' + regex, line, re.IGNORECASE): continue
+            if re.search(r'^' + regex, line, re.IGNORECASE):
+                continue
             elif re.search(regex_inline, line):
                 pipe.append(re.sub(regex_inline, r'\1', line))
         else:
             pipe.append(line)
-    return  "\n".join(pipe)
+    return "\n".join(pipe)
 
 
 class ConfigParseError(IOError):
@@ -86,11 +88,11 @@ class Config(object):
                 val = Config(val, key, self, file)
             elif isinstance(val, list):
                 val = [
-                       Config(item, key + "[%s]" % i, self, file)
-                       if isinstance(item, dict)
-                       else item
-                       for i, item in enumerate(val)
-                       ]
+                    Config(item, key + "[%s]" % i, self, file)
+                    if isinstance(item, dict)
+                    else item
+                    for i, item in enumerate(val)
+                ]
 
             if not is_name_pythonic(key):
                 self._d[key] = val

@@ -1,29 +1,18 @@
 from __future__ import division
 
-import os
 from contextlib import contextmanager
-from multiprocessing import cpu_count
 from copy import deepcopy
+from inro.emme.core.exception import ProtectionError, CapacityError
+from inro.emme.matrix import MatrixData
+import inro.modeller as m
+from multiprocessing import cpu_count
+import numpy as np
+import os
+import pandas as pd
 
 from shapely.geometry import Point, LineString, Polygon
 import shapelib as shp
 import dbflib as dbf
-
-import pandas as pd
-import numpy as np
-from inro.emme.matrix import MatrixData
-from inro.emme.core.exception import ProtectionError, CapacityError
-import inro.modeller as m
-
-try:
-    mm = m.Modeller()
-except:
-    if 'GGHM_SPHINX_EMP' in os.environ:  # Start an Emme instance to allow Sphinx to autodoc module
-        from inro.emme.desktop.app import start_dedicated
-        app = start_dedicated(project=os.environ['GGHM_SPHINX_EMP'], visible=False, user_initials='doc')
-        mm = m.Modeller(app)
-    else:
-        raise
 
 
 def init_matrix(mtx_id=None,  matrix_type="FULL", default=0.0, name="", description="", log=True):
@@ -43,15 +32,16 @@ def init_matrix(mtx_id=None,  matrix_type="FULL", default=0.0, name="", descript
         Matrix: A Matrix instance representing the new or initialized matrix.
     """
 
-    embank = mm.emmebank
+    mm = m.Modeller()
+    emmebank = mm.emmebank
 
     if mtx_id is None:
-        mtx_id = embank.available_matrix_identifier(matrix_type)
+        mtx_id = emmebank.available_matrix_identifier(matrix_type)
 
-    matrix = embank.matrix(mtx_id)
+    matrix = emmebank.matrix(mtx_id)
 
     if matrix is None:
-        matrix = embank.create_matrix(mtx_id, default_value=default)
+        matrix = emmebank.create_matrix(mtx_id, default_value=default)
         if log:
             m.logbook_write("Created new %s = %s" % (mtx_id, default))
     else:
@@ -87,6 +77,7 @@ def temporary_matrices(matrices=1, matrix_type='FULL', emmebank=None, log=False,
         basestring or Matrix: depending on the value of `id`.
     """
 
+    mm = m.Modeller()
     emmebank = mm.emmebank if emmebank is None else emmebank
 
     try:
@@ -98,7 +89,8 @@ def temporary_matrices(matrices=1, matrix_type='FULL', emmebank=None, log=False,
     try:
         for description in descriptors:
             matrix = init_matrix(description=description, log=log, matrix_type=matrix_type)
-            if id: matrix = matrix.id
+            if id:
+                matrix = matrix.id
             created_matrices.append(matrix)
 
         if len(created_matrices) == 1 and squeeze:
@@ -284,7 +276,8 @@ def load_link_dataframe(scenario, pythonize_exatts=False):
         DataFrame
     """
     attr_list = scenario.attributes('LINK')
-    if "vertices" in attr_list: attr_list.remove("vertices")
+    if "vertices" in attr_list:
+        attr_list.remove("vertices")
 
     data_pack = scenario.get_attribute_values('LINK', attr_list)
     data_positions = data_pack[0]
@@ -313,8 +306,9 @@ def load_turn_dataframe(scenario, pythonize_exatts=False):
     """Creates a table for turn attributes in a scenario.
 
     Args:
-        scenario: An instance of inro.emme.scenario.Scenario
-        pythonize_exatts: Flag to make extra attribute names 'Pythonic'. If set to True, then "@stn1" will become "x_stn1".
+        scenario (Scenario): An instance of inro.emme.scenario.Scenario
+        pythonize_exatts (bool): Flag to make extra attribute names 'Pythonic'. If set to True, then "@stn1" will become
+            "x_stn1".
 
     Returns:
         DataFrame
@@ -349,8 +343,9 @@ def load_transit_line_dataframe(scenario, pythonize_exatts=False):
     """Creates a table for transit line attributes in a scenario.
 
     Args:
-        scenario: An instance of inro.emme.scenario.Scenario
-        pythonize_exatts: Flag to make extra attribute names 'Pythonic'. If set to True, then "@stn1" will become "x_stn1".
+        scenario (Scenario): An instance of inro.emme.scenario.Scenario
+        pythonize_exatts (bool): Flag to make extra attribute names 'Pythonic'. If set to True, then "@stn1" will become
+            "x_stn1".
 
     Returns:
         DataFrame
@@ -379,8 +374,9 @@ def load_transit_segment_dataframe(scenario, pythonize_exatts=False):
     """Creates a table for transit segment attributes in a scenario.
 
     Args:
-        scenario: An instance of inro.emme.scenario.Scenario
-        pythonize_exatts: Flag to make extra attribute names 'Pythonic'. If set to True, then "@stn1" will become "x_stn1".
+        scenario (Scenario): An instance of inro.emme.scenario.Scenario
+        pythonize_exatts (bool): Flag to make extra attribute names 'Pythonic'. If set to True, then "@stn1" will become
+            "x_stn1".
 
     Returns:
         DataFrame
@@ -395,7 +391,8 @@ def load_transit_segment_dataframe(scenario, pythonize_exatts=False):
     segment_indexer = {}
     for line, segment_data in index_data.iteritems():
         for tupl, pos in segment_data.iteritems():
-            if len(tupl) == 3: i, j, loop = tupl
+            if len(tupl) == 3:
+                i, j, loop = tupl
             else:
                 i, j = tupl
                 loop = 0
@@ -446,7 +443,8 @@ def split_zone_in_matrix(base_matrix, old_zone, new_zones, proportions):
 
     intersection_index = base_matrix.index.drop(old_zone)
     new_index = intersection_index
-    for z in new_zones: new_index = new_index.insert(-1, z)
+    for z in new_zones:
+        new_index = new_index.insert(-1, z)
     new_index = pd.Index(sorted(new_index))
 
     new_matrix = pd.DataFrame(0, index=new_index, columns=new_index, dtype=base_matrix.dtypes.iat[0])
@@ -576,8 +574,10 @@ def extract_stopping_criteria(report):
 
 
 def parallel_strategy_allowed(logr):
-    # Check for Emme 4.3 OR for a test-beta version. By default, if there's a problem, turn off parallel analysis
+    # Check for Emme 4.3 OR for a test-beta version. By default, if there's a problem, turn off parallel analysis. This
+    # function is kept for backwards compatibility. Should be removed in future versions.
     try:
+        mm = m.Modeller()
         if os.environ['EMMEPATH'].endswith('Emme-test-160811'):
             logr.warn("Detected test version of Emme base on EMMEPATH environmental variable. Turning on parallel"
                       "analysis, but be aware that this check may not be future-proof")
@@ -642,6 +642,7 @@ def analyze_traffic_assignment_stability(scenario, demand_matrix, auto_mode, gap
             and the values are based on statistical analyses of the instantaneous change in link volume.
     """
 
+    mm = m.Modeller()
     run_traffic_assignment = mm.tool('inro.emme.traffic_assignment.standard_traffic_assignment')
     continue_traffic_assignment = mm.tool('inro.emme.traffic_assignment.continue_traffic_assignment')
     if gaps_to_test is None:

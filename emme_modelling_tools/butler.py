@@ -1,42 +1,18 @@
 from __future__ import division
 
+from contextlib import contextmanager
+from datetime import datetime as dt
+import inro.modeller as m
+import numpy as np
 import os
+import pandas as pd
 import shutil
 import sqlite3 as sqlite
-from datetime import datetime as dt
 from warnings import warn
-from contextlib import contextmanager
 
-import numpy as np
-import pandas as pd
-import inro.modeller as m
-
+from emme_utils import matrix_to_pandas, pandas_to_matrix
 from ..matrix_converters import from_fortran_rectangle, to_fortran
 from ..matrix_converters.matrix_converters.common import expand_array, coerce_matrix
-
-try:
-    try:
-        mm = m.Modeller()
-    except:
-        if 'GGHM_SPHINX_EMP' in os.environ:  # Start an Emme instance to allow Sphinx to autodoc module
-            from inro.emme.desktop.app import start_dedicated
-            app = start_dedicated(project=os.environ['GGHM_SPHINX_EMP'], visible=False, user_initials='doc')
-            mm = m.Modeller(app)
-        else:
-            raise AssertionError
-    project_emmebank = mm.emmebank
-    del mm, m
-    from emme_utils import matrix_to_pandas, pandas_to_matrix
-except (ImportError, AssertionError):
-    # AssertionError is thrown by Emme if a Modeller connection already exists.
-    project_emmebank = None
-
-    # Need some function to avoid NameError. So set the imports to this blank function which raises when they try to be
-    # used
-    def blank_function(*args, **kwargs):
-        raise ImportError("Cannot reda or write to Emme matrices when no Emme libraries are installed")
-    matrix_to_pandas = blank_function
-    pandas_to_matrix = blank_function
 
 
 class ButlerOverwriteWarning(RuntimeWarning):
@@ -59,28 +35,30 @@ class MatrixEntry(object):
 
 class MatrixButler(object):
 
+    mm = m.Modeller()
+    emmebank = mm.emmebank
+
     MATRIX_EXTENSION = 'bin'
     SUBDIRECTORY_NAME = 'emmebin'
     DB_NAME = "matrix_directory.sqlite"
+    BACKUP_DB_NAME = "matrix_directory_backup.sqlite"
 
     @staticmethod
     def convert_from_old_version(parenty_directory, keep_backup=True):
-        """
-        Converts, in-situ, the old version of MatrixButler (which does not support slicing of matrices) into the new
+        """Converts, in-situ, the old version of MatrixButler (which does not support slicing of matrices) into the new
         version (which does).
 
         Args:
             parenty_directory (str): Filepath to the parent folder of the butler. Same argument as is passed to
                 connect() or create()
             keep_backup (bool): If true, a backup copy will be made before modifications begin.
-
         """
         warn(ButlerOverwriteWarning("Converting an old MatrixButler is a one-way operation."))
 
         db_path = os.path.join(parenty_directory, MatrixButler.SUBDIRECTORY_NAME, MatrixButler.DB_NAME)
 
         if keep_backup:
-            backup_path = os.path.join(parenty_directory, MatrixButler.SUBDIRECTORY_NAME, "matrix_directory_backup.sqlite")
+            backup_path = os.path.join(parenty_directory, MatrixButler.SUBDIRECTORY_NAME, MatrixButler.BACKUP_DB_NAME)
             shutil.copy(db_path, backup_path)
 
         connection = sqlite.connect(db_path)
@@ -127,8 +105,7 @@ class MatrixButler(object):
 
     @staticmethod
     def create(parent_directory, zone_system, fortran_max_zones):
-        """
-        Creates a new (or clears and initializes and existing) MatrixButler.
+        """Creates a new (or clears and initializes and existing) MatrixButler.
 
         Args:
             parent_directory (unicode): The parent directory in which to keep the Butler.
@@ -136,7 +113,7 @@ class MatrixButler(object):
             fortran_max_zones (int): The total number of zones expected by the FORTRAN matrix reader.
 
         Returns:
-            MatrixButler instance.
+            MatrixButler: A MatrixButler instance.
         """
         zone_system = pd.Int64Index(zone_system)
         fortran_max_zones = int(fortran_max_zones)
@@ -235,25 +212,26 @@ class MatrixButler(object):
 
     @staticmethod
     def connect(parent_directory):
-        """
-        Connect to an existing MatrixButler, without initializing it
+        """Connect to an existing MatrixButler, without initializing it
 
         Args:
-            parent_directory (unicode): The parent directory in which to find the MatrixButler.
+            parent_directory (str): The parent directory in which to find the MatrixButler.
 
         Returns:
-            IOError if a MatrixButler cannot be found at the given parent directory.
+            MatrixButler: A MatrixButler instance
 
+        Raises:
+            IOError: if a MatrixButler cannot be found at the given parent directory.
         """
         butler_path = os.path.join(parent_directory, MatrixButler.SUBDIRECTORY_NAME)
         if not os.path.exists(butler_path):
             raise IOError("No matrix butler found at '%s'" % parent_directory)
 
-        dbfile = os.path.join(butler_path, MatrixButler.DB_NAME)
-        if not os.path.exists(dbfile):
+        db_file = os.path.join(butler_path, MatrixButler.DB_NAME)
+        if not os.path.exists(db_file):
             raise IOError("No matrix butler found at '%s'" % parent_directory)
 
-        db = sqlite.connect(dbfile)
+        db = sqlite.connect(db_file)
         db.row_factory = sqlite.Row
         fortran_max_zones, zone_system = MatrixButler._preload(db)
 
@@ -319,15 +297,14 @@ class MatrixButler(object):
         WHERE id=?
         """
         result = list(self._connection.execute(sql, [item]))
-        if len(result) < 1: raise KeyError(item)
+        if len(result) < 1:
+            raise KeyError(item)
 
         item = result[0]
         return MatrixEntry(item['id'], item['description'], item['timestamp'], item['type'])
 
     def to_frame(self):
-        """
-        Returns a representation of the butler's contents as a pandas.DataFrame
-        """
+        """Returns a representation of the butler's contents as a pandas.DataFrame"""
         uids, descriptions, timestamps, types = [], [], [], []
         for entry in self:
             uids.append(entry.uid)
@@ -378,20 +355,23 @@ class MatrixButler(object):
     @staticmethod
     def _get_emmebank(arg):
         if arg is None:
-            if project_emmebank is None:
+            if MatrixButler.emmebank is None:
                 raise ImportError("No Modeller instance available.")
-            return project_emmebank
+            return MatrixButler.emmebank
         return arg
 
     @contextmanager
     def batch_operations(self):
-        """
-        Context-manager for writing several matrices in one batch. Reduces write time per matrix by committing changes
+        """Context-manager for writing several matrices in one batch.
+
+        Reduces write time per matrix by committing changes
         to the DB at the end of the batch write. The time savings can be quite significant, as the DB-write is normally
         50% of the time per matrix write.
 
-        Yields: None
+        Yields:
+            None
         """
+
         # This snippet is just in case this function is called within its own context (e.g. someone turns on
         # batch mode while it's already on).
         if not self._committing:
@@ -407,16 +387,15 @@ class MatrixButler(object):
             self._committing = True
 
     def lookup_numbers(self, unique_id, squeeze=True):
-        """
-        Looks up file number(s) (e.g. 50 corresponds to "mf50.bin") of a given matrix.
+        """Looks up file number(s) (e.g. 50 corresponds to "mf50.bin") of a given matrix.
 
         Args:
             unique_id (str): The ID of the matrix to look up
             squeeze (bool): If True, and only one matrix number corresponds to the unique ID, then the result will
                 be a single integer. Otherwise, a list of integers is returned.
 
-        Returns: Int or List[int], depending on results and `squeeze`
-
+        Returns:
+            Int or List[int]: depending on results and `squeeze`
         """
 
         sql = """
@@ -435,17 +414,18 @@ class MatrixButler(object):
         return numbers
 
     def is_sliced(self, unique_id):
-        """
-        Checks if a matrix is sliced on-disk or not.
+        """Checks if a matrix is sliced on-disk or not.
 
         Args:
-            unique_id (str): The ID of the matrix to checl
+            unique_id (str): The ID of the matrix to check
 
-        Returns (bool): True if matrix is sliced, False otherwise.
+        Returns:
+            bool: True if matrix is sliced, False otherwise.
 
-        Raises: KeyError if unique_id is not in the butler.
-
+        Raises:
+            KeyError: if unique_id is not in the butler.
         """
+
         return len(self.lookup_numbers(unique_id, squeeze=False)) > 1
 
     def _next_numbers(self, n):
@@ -463,7 +443,8 @@ class MatrixButler(object):
         return numbers
 
     def _check_lookup(self, unique_id, n, partition):
-        if partition: n += 1
+        if partition:
+            n += 1
 
         try:
             numbers = self.lookup_numbers(unique_id, squeeze=False)
@@ -544,8 +525,7 @@ class MatrixButler(object):
             to_fortran(remainder, remainder_file, force_square=False, min_index=min_index)
 
     def init_matrix(self, unique_id, description="", type_name="", fill=True, n_slices=1, partition=False):
-        """
-        Registers a new (or zeros an old) matrix with the butler.
+        """Registers a new (or zeros an old) matrix with the butler.
 
         Args:
             unique_id (str): The unique identifier for this matrix.
@@ -572,21 +552,21 @@ class MatrixButler(object):
         self._write_matrix_record(unique_id, numbers, description, type_name)
 
     def load_matrix(self, unique_id, target_mfid=None, scenario_id=None, emmebank=None):
-        """
-        Gets a matrix from the butler, optionally saving into an Emmebank.
+        """Gets a matrix from the butler, optionally saving into an Emmebank.
 
         Args:
             unique_id (str): The name you gave to the butler for safekeeping.
             target_mfid (str or None): If provided, the butler will copy the matrix into the Emmebank at this
                 given matrix ID or name. This matrix will br created if it doesn't already exist.
-            scenario_id (int or str): As passed to Matrix.set_data(). The ID of a scenario with a compatible zone system.
+            scenario_id (int or str): As passed to Matrix.set_data(). The ID of a scenario with a compatible zone system
             emmebank (Emmebank or None): Alternate Emmebank in which to save the matrix, if `target_mfid` is provided.
                 Defaults to the Emmebank of the current Emme project when launched from Emme Python
 
-        Returns: DataFrame or None, depending on whether `target_mfid` is given.
+        Returns:
+            DataFrame or None: depending on whether `target_mfid` is given.
 
         Raises:
-            KeyError if unique_id is not in the butler.
+            KeyError: if unique_id is not in the butler.
         """
 
         is_sliced = self.is_sliced(unique_id)
@@ -606,22 +586,22 @@ class MatrixButler(object):
             # Save the matrix to the Emmebank. Return nothing.
             emmebank = self._get_emmebank(emmebank)
             matrix_container = emmebank.matrix(target_mfid)
-            if matrix_container is None: matrix_container = emmebank.create_matrix(target_mfid)
+            if matrix_container is None:
+                matrix_container = emmebank.create_matrix(target_mfid)
             pandas_to_matrix(matrix, matrix_container, scenario_id=scenario_id)
         else:
             return matrix
 
     def save_matrix(self, dataframe_or_mfid, unique_id, description="", type_name="", scenario_id=None, emmebank=None,
                     fill_eminf=False, n_slices=1, partition=False, reindex=True, fill_value=0.0):
-        """
-        Passes a matrix to the butler for safekeeping.
+        """Passes a matrix to the butler for safekeeping.
 
         Args:
             dataframe_or_mfid (DataFrame or str): Specifies the matrix to save. If basestring, it is assumed to
                 refer to a matrix in an Emmebank (see `emmebank`). Otherwise, a square DataFrame is required.
             unique_id (str): The unique identifier for this matrix.
             description (str): A brief description of the matrix.
-            scenario_id (int or str): As passed to Matrix.get_data(). The ID of a scenario with a compatible zone system.
+            scenario_id (int or str): As passed to Matrix.get_data(). The ID of a scenario with a compatible zone system
             emmebank (Emmebank or None): If using an mfid for the first arg, its matrix will be pulled from this
                 Emmebank. Defaults to the Emmebank of the current Emme project when launched from Emme Python
             type_name (str): The string type
@@ -633,6 +613,10 @@ class MatrixButler(object):
                 AssertionError will be raised when one of the DataFrame's axes doesn't match the Butler's zone system.
             fill_value (float): The fill value to be used when reindexing (see 'reindex' flag) or filling Emme infinity
                 (see `fill_eminf` flag)
+
+        Raises:
+            KeyError: if a matrix id is supplied but not found in the Emmebank
+            AssertionError: if a DataFrame is supplied and does not match the zone system and reindex is False
         """
 
         n_slices, partition = self._validate_slice_args(n_slices, partition)
@@ -640,7 +624,8 @@ class MatrixButler(object):
         if isinstance(dataframe_or_mfid, basestring):
             emmebank = self._get_emmebank(emmebank)
             matrix_container = emmebank.matrix(dataframe_or_mfid)
-            if matrix_container is None: raise KeyError(dataframe_or_mfid)
+            if matrix_container is None:
+                raise KeyError(dataframe_or_mfid)
 
             matrix = coerce_matrix(matrix_to_pandas(matrix_container, scenario_id), allow_raw=True, force_square=True)
 
@@ -650,10 +635,12 @@ class MatrixButler(object):
         else:
             if isinstance(dataframe_or_mfid, pd.DataFrame):
                 if not dataframe_or_mfid.index.equals(self._zone_system):
-                    if not reindex: raise AssertionError()
+                    if not reindex:
+                        raise AssertionError()
                     dataframe_or_mfid = dataframe_or_mfid.reindex_axis(self._zone_system, fill_value=fill_value, axis=0)
                 if not dataframe_or_mfid.columns.equals(self._zone_system):
-                    if not reindex: raise AssertionError()
+                    if not reindex:
+                        raise AssertionError()
                     dataframe_or_mfid = dataframe_or_mfid.reindex_axis(self._zone_system, fill_value=fill_value, axis=1)
             matrix = coerce_matrix(dataframe_or_mfid, allow_raw=True, force_square=True)
             assert matrix.shape == (len(self._zone_system),) * 2
@@ -665,14 +652,13 @@ class MatrixButler(object):
         self._write_matrix_record(unique_id, numbers, description, type_name)
 
     def query_type(self, type_name):
-        """
-        Gets a list of matrix IDs by their type name
+        """Gets a list of matrix IDs by their type name
 
         Args:
             type_name (str): The type name to query
 
         Returns:
-            A list of matching IDs
+            list: A list of matching IDs
         """
         sql = """
         SELECT id FROM matrices
@@ -682,28 +668,29 @@ class MatrixButler(object):
         return [item['id'] for item in self._connection.execute(sql, [type_name])]
 
     def matrix_metadata(self, unique_id):
-        """
-        Looks up a single matrix record and returns its metadata (description, type, timestamp) in a dictionary
+        """Looks up a single matrix record and returns its metadata (description, type, timestamp) in a dictionary
 
         Args:
             unique_id (str): The unique ID of the matrix to lookup
 
-        Returns: Dict corresponding to the matrix record. Keys are 'id', 'description', 'timestamp', and 'type'
+        Returns:
+            Dict: corresponding to the matrix record. Keys are 'id', 'description', 'timestamp', and 'type'
 
-        Raises: KeyError if unique ID not in the butler.
+        Raises:
+            KeyError: if unique ID not in the butler.
         """
         sql = """
         SELECT id, description, type, timestamp FROM matrices
         WHERE id=?;
         """
         results = list(self._connection.execute(sql, [unique_id]))
-        if not results: raise KeyError(unique_id)
+        if not results:
+            raise KeyError(unique_id)
         row = results[0]
         return dict(row)
 
     def slice_matrix(self, unique_id, n_slices=1, partition=None):
-        """
-        Slices a matrix into chunks along its rows (on-disk) for use in mutli-processing.
+        """Slices a matrix into chunks along its rows (on-disk) for use in mutli-processing.
 
         Does nothing if matrix is already sliced.
 
@@ -714,7 +701,8 @@ class MatrixButler(object):
         """
         prior_n_slices = len(self.lookup_numbers(unique_id, squeeze=False))
         expected_slices = n_slices + 1 if partition else n_slices
-        if prior_n_slices == expected_slices: return  # Do nothing if already sliced to the called number
+        if prior_n_slices == expected_slices:
+            return  # Do nothing if already sliced to the called number
 
         n_slices, partition = self._validate_slice_args(n_slices, partition)
 
@@ -727,14 +715,13 @@ class MatrixButler(object):
                              partition=partition)
 
     def unslice_matrix(self, unique_id):
-        """
-        "Un-slices" (i.e. concatenates) a sliced matrix in the butler. Does nothing if the matrix is not sliced.
+        """'Un-slices' (i.e. concatenates) a sliced matrix in the butler. Does nothing if the matrix is not sliced.
 
         Args:
             unique_id (str): The ID of the matrix to slice.
-
         """
-        if not self.is_sliced(unique_id): return  # Do nothing is matrix is already not sliced
+        if not self.is_sliced(unique_id):
+            return  # Do nothing is matrix is already not sliced
         matrix = self.load_matrix(unique_id)
         metadata = self.matrix_metadata(unique_id)
 
@@ -743,15 +730,13 @@ class MatrixButler(object):
             self.save_matrix(matrix, unique_id, metadata['description'], metadata['type'], n_slices=1)
 
     def delete_matrix(self, unique_id):
-        """
-        Deletes a matrix from the butler's directory
+        """Deletes a matrix from the butler's directory
 
         Args:
             unique_id (str): The unique identifier of the matrix to delete.
 
         Raises:
             KeyError if unique_id cannot be found.
-
         """
 
         numbers = self.lookup_numbers(unique_id, squeeze=False)
