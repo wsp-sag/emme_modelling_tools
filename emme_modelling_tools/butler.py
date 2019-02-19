@@ -35,9 +35,6 @@ class MatrixEntry(object):
 
 class MatrixButler(object):
 
-    mm = m.Modeller()
-    emmebank = mm.emmebank
-
     MATRIX_EXTENSION = 'bin'
     SUBDIRECTORY_NAME = 'emmebin'
     DB_NAME = "matrix_directory.sqlite"
@@ -355,9 +352,10 @@ class MatrixButler(object):
     @staticmethod
     def _get_emmebank(arg):
         if arg is None:
-            if MatrixButler.emmebank is None:
+            emmebank = m.Modeller().emmebank
+            if emmebank is None:
                 raise ImportError("No Modeller instance available.")
-            return MatrixButler.emmebank
+            return emmebank
         return arg
 
     @contextmanager
