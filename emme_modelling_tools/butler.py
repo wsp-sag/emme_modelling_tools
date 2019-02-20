@@ -34,6 +34,9 @@ class MatrixEntry(object):
 
 
 class MatrixButler(object):
+    """Responsible for managing matrix data, converting between various formats of matrices, as well as keeping track of
+    matrix metadata (e.g. description, type). Stores matrices as binary files.
+    """
 
     MATRIX_EXTENSION = 'bin'
     SUBDIRECTORY_NAME = 'emmebin'
@@ -46,9 +49,10 @@ class MatrixButler(object):
         version (which does).
 
         Args:
-            parenty_directory (str): Filepath to the parent folder of the butler. Same argument as is passed to
-                connect() or create()
-            keep_backup (bool): If true, a backup copy will be made before modifications begin.
+            parenty_directory (str): File path to the parent folder of the `MatrixButler`. Same argument as is passed to
+                ``MatrixButler.connect()`` or ``MatrixButler.create()``
+            keep_backup (bool, optional): Defaults to ``True``. If ``True``, a backup copy will be made before
+                modifications begin.
         """
         warn(ButlerOverwriteWarning("Converting an old MatrixButler is a one-way operation."))
 
@@ -105,12 +109,12 @@ class MatrixButler(object):
         """Creates a new (or clears and initializes and existing) MatrixButler.
 
         Args:
-            parent_directory (unicode): The parent directory in which to keep the Butler.
+            parent_directory (str): The parent directory in which to keep the `MatrixButler`.
             zone_system (pandas.Int64Index or List[int]): The zone system to conform to.
             fortran_max_zones (int): The total number of zones expected by the FORTRAN matrix reader.
 
         Returns:
-            MatrixButler: A MatrixButler instance.
+            MatrixButler: A `MatrixButler` instance.
         """
         zone_system = pd.Int64Index(zone_system)
         fortran_max_zones = int(fortran_max_zones)
@@ -212,13 +216,13 @@ class MatrixButler(object):
         """Connect to an existing MatrixButler, without initializing it
 
         Args:
-            parent_directory (str): The parent directory in which to find the MatrixButler.
+            parent_directory (str): The parent directory in which to find the `MatrixButler`.
 
         Returns:
-            MatrixButler: A MatrixButler instance
+            MatrixButler: A `MatrixButler` instance
 
         Raises:
-            IOError: if a MatrixButler cannot be found at the given parent directory.
+            IOError: if a `MatrixButler` cannot be found at the given parent directory.
         """
         butler_path = os.path.join(parent_directory, MatrixButler.SUBDIRECTORY_NAME)
         if not os.path.exists(butler_path):
@@ -301,7 +305,7 @@ class MatrixButler(object):
         return MatrixEntry(item['id'], item['description'], item['timestamp'], item['type'])
 
     def to_frame(self):
-        """Returns a representation of the butler's contents as a pandas.DataFrame"""
+        """Returns a representation of the MatrixButler's contents as a Pandas DataFrame"""
         uids, descriptions, timestamps, types = [], [], [], []
         for entry in self:
             uids.append(entry.uid)
@@ -362,9 +366,8 @@ class MatrixButler(object):
     def batch_operations(self):
         """Context-manager for writing several matrices in one batch.
 
-        Reduces write time per matrix by committing changes
-        to the DB at the end of the batch write. The time savings can be quite significant, as the DB-write is normally
-        50% of the time per matrix write.
+        Reduces write time per matrix by committing changes to the DB at the end of the batch write. The time savings
+        can be quite significant, as the DB-write is normally 50% of the time per matrix write.
 
         Yields:
             None
@@ -389,11 +392,11 @@ class MatrixButler(object):
 
         Args:
             unique_id (str): The ID of the matrix to look up
-            squeeze (bool): If True, and only one matrix number corresponds to the unique ID, then the result will
-                be a single integer. Otherwise, a list of integers is returned.
+            squeeze (bool, optional): Defaults to ``True``. If ``True``, and only one matrix number corresponds to the
+                unique ID, then the result will be a single integer. Otherwise, a list of integers is returned.
 
         Returns:
-            Int or List[int]: depending on results and `squeeze`
+            Int or List[int]: Matrix IDs, depending on results and `squeeze`
         """
 
         sql = """
@@ -418,10 +421,10 @@ class MatrixButler(object):
             unique_id (str): The ID of the matrix to check
 
         Returns:
-            bool: True if matrix is sliced, False otherwise.
+            bool: ``True`` if matrix is sliced, ``False`` otherwise.
 
         Raises:
-            KeyError: if unique_id is not in the butler.
+            KeyError: if ``unique_id`` is not in the butler.
         """
 
         return len(self.lookup_numbers(unique_id, squeeze=False)) > 1
@@ -527,11 +530,13 @@ class MatrixButler(object):
 
         Args:
             unique_id (str): The unique identifier for this matrix.
-            description (str):  A brief description of the matrix.
-            type_name (str): Type categorization of the matrx.
-            fill (bool): If False, empty (0-byte) files will be initialized. Otherwise, 0-matrix files will be created.
-            n_slices (int): Number of slices (on-disk) for multi-processing.
-            partition (bool): Flag whether to partition the matrix before saving, based on self.zone_partition
+            description (str, optional): Defaults to ``""``. A brief description of the matrix.
+            type_name (str, optional): Defaults to ``""``. Type categorization of the matrix.
+            fill (bool, optional): Defaults to ``True``. If ``False``, empty (0-byte) files will be initialized.
+                Otherwise, 0-matrix files will be created.
+            n_slices (int, optional): Defaults to ``1``. Number of slices (on-disk) for multi-processing.
+            partition (bool, optional): Defaults to ``False``. Flag whether to partition the matrix before saving, based
+                on ``self.zone_partition``.
         """
         n_slices, partition = self._validate_slice_args(n_slices, partition)
 
@@ -553,18 +558,20 @@ class MatrixButler(object):
         """Gets a matrix from the butler, optionally saving into an Emmebank.
 
         Args:
-            unique_id (str): The name you gave to the butler for safekeeping.
-            target_mfid (str or None): If provided, the butler will copy the matrix into the Emmebank at this
-                given matrix ID or name. This matrix will br created if it doesn't already exist.
-            scenario_id (int or str): As passed to Matrix.set_data(). The ID of a scenario with a compatible zone system
-            emmebank (Emmebank or None): Alternate Emmebank in which to save the matrix, if `target_mfid` is provided.
-                Defaults to the Emmebank of the current Emme project when launched from Emme Python
+            unique_id (str): The name you gave to the MatrixButler for safekeeping.
+            target_mfid (str or None, optional): Defaults to ``None``. If provided, the MatrixButler will copy the
+                matrix into the `Emmebank` at the given matrix ID or name. This matrix is created if it doesn't already
+                exist.
+            scenario_id (int or str, optional): Defaults to ``None``. The ID of a scenario, as passed to
+                ``Matrix.set_data()``. The scenario must use a compatible zone system
+            emmebank (Emmebank or None, optional): Defaults to ``None``. An Emmebank in which to save the matrix to if
+                `target_mfid` is provided. If ``None``, the `Emmebank` of the current Emme project will be used.
 
         Returns:
-            DataFrame or None: depending on whether `target_mfid` is given.
+            DataFrame or None: A matrix depending on whether `target_mfid` is given.
 
         Raises:
-            KeyError: if unique_id is not in the butler.
+            KeyError: if ``unique_id`` is not in the MatrixButler.
         """
 
         is_sliced = self.is_sliced(unique_id)
@@ -595,26 +602,31 @@ class MatrixButler(object):
         """Passes a matrix to the butler for safekeeping.
 
         Args:
-            dataframe_or_mfid (DataFrame or str): Specifies the matrix to save. If basestring, it is assumed to
-                refer to a matrix in an Emmebank (see `emmebank`). Otherwise, a square DataFrame is required.
-            unique_id (str): The unique identifier for this matrix.
-            description (str): A brief description of the matrix.
-            scenario_id (int or str): As passed to Matrix.get_data(). The ID of a scenario with a compatible zone system
-            emmebank (Emmebank or None): If using an mfid for the first arg, its matrix will be pulled from this
-                Emmebank. Defaults to the Emmebank of the current Emme project when launched from Emme Python
-            type_name (str): The string type
-            fill_eminf (bool): If true, the Butler will fill Emme's "infinity" values (+- 1.0E20) with 0 before
-                exporting. Only available if copying from an Emmebank
-            n_slices (int): Number of slices (on-disk) for multi-processing.
-            partition (bool): Flag whether to partition the matrix before saving, based on self.zone_partition
-            reindex (bool): Flag to indicate if partial matrices are accepted when supplying a DataFrame. If False,
-                AssertionError will be raised when one of the DataFrame's axes doesn't match the Butler's zone system.
-            fill_value (float): The fill value to be used when reindexing (see 'reindex' flag) or filling Emme infinity
-                (see `fill_eminf` flag)
+            dataframe_or_mfid (DataFrame or str): Specifies the matrix to save. If a string, it is assumed to refer to a
+                matrix in an `Emmebank` (see `emmebank`). Otherwise, a square `DataFrame` is required.
+            unique_id (str): The unique name identifier for this matrix.
+            description (str, optional): Defaults to ``""``. A brief description of the matrix.
+            type_name (str, optional): Defaults to ``""``. Type categorization of the matrix.
+            scenario_id (int or str): Defaults to ``None``. The ID of a scenario, as passed to ``Matrix.get_data()``.
+                The scenario must have a compatible zone system.
+            emmebank (Emmebank or None, optional): Defaults to ``None``. If using an mfid for the first arg, the
+                corresponding matrix will be pulled from the specified `Emmebank`. If ``None``, the `Emmebank` of the
+                current Emme session will be used.
+            fill_eminf (bool, optional): Defaults to ``False``. If ``True``, the `MatrixButler` will fill matrix values
+                containing Emme's "infinity" values (+/- 1.0E20) with 0 in the matrix being saved before adding to the
+                `MatrixButler`. Only available if copying from an `Emmebank`.
+            n_slices (int, optional): Defaults to ``1``. Number of slices (on-disk) for multi-processing.
+            partition (bool, optional): Defaults to ``False``. Flag whether to partition the matrix before saving, based
+                on ``self.zone_partition``.
+            reindex (bool, optional): Defaults to ``True``. Flag to indicate if partial matrices are accepted when
+                supplying a DataFrame. If ``False``, `AssertionError` will be raised when one of the `DataFrame` axes
+                doesn't match the `MatrixButler` zone system.
+            fill_value (float, optional): Defaults to ``0.0``. The fill value to be used when reindexing (see 'reindex'
+                flag) or filling Emme infinity (see `fill_eminf` flag)
 
         Raises:
-            KeyError: if a matrix id is supplied but not found in the Emmebank
-            AssertionError: if a DataFrame is supplied and does not match the zone system and reindex is False
+            KeyError: if a matrix id is supplied but not found in the `Emmebank`
+            AssertionError: if a `DataFrame` is supplied and does not match the zone system and reindex is ``False``
         """
 
         n_slices, partition = self._validate_slice_args(n_slices, partition)

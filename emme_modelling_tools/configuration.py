@@ -55,6 +55,7 @@ class ConfigSpecificationError(AttributeError):
 
 
 class Config(object):
+    """A class to manage model configuration files."""
 
     @staticmethod
     def fromfile(fp):
