@@ -2,7 +2,6 @@ from __future__ import division
 
 from contextlib import contextmanager
 from datetime import datetime as dt
-import inro.modeller as m
 import numpy as np
 import os
 import pandas as pd
@@ -10,9 +9,24 @@ import shutil
 import sqlite3 as sqlite
 from warnings import warn
 
-from emme_utils import matrix_to_pandas, pandas_to_matrix
 from ..matrix_converters import from_fortran_rectangle, to_fortran
 from ..matrix_converters.matrix_converters.common import expand_array, coerce_matrix
+
+try:
+    import inro.modeller as m
+    from emme_utils import matrix_to_pandas, pandas_to_matrix
+
+    modeller_available = True
+except (ImportError, AssertionError):
+    modeller_available = False
+
+    # Need some function to avoid NameError. So set the imports to this blank function which raises when they try to be
+    # used
+    def blank_function(*args, **kwargs):
+        raise ImportError("Cannot read/write to Emme matrices when no Emme libraries are installed")
+
+    matrix_to_pandas = blank_function
+    pandas_to_matrix = blank_function
 
 
 class ButlerOverwriteWarning(RuntimeWarning):
@@ -356,10 +370,10 @@ class MatrixButler(object):
     @staticmethod
     def _get_emmebank(arg):
         if arg is None:
-            emmebank = m.Modeller().emmebank
-            if emmebank is None:
+            if modeller_available:
+                return m.Modeller().emmebank
+            else:
                 raise ImportError("No Modeller instance available.")
-            return emmebank
         return arg
 
     @contextmanager
