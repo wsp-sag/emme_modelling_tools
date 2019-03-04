@@ -58,22 +58,22 @@ class MatrixButler(object):
     BACKUP_DB_NAME = "matrix_directory_backup.sqlite"
 
     @staticmethod
-    def convert_from_old_version(parenty_directory, keep_backup=True):
-        """Converts, in-situ, the old version of MatrixButler (which does not support slicing of matrices) into the new
-        version (which does).
+    def convert_from_old_version(parent_directory, keep_backup=True):
+        # """Converts, in-situ, the old version of MatrixButler (which does not support slicing of matrices) into the new
+        # version (which does).
 
-        Args:
-            parenty_directory (str): File path to the parent folder of the `MatrixButler`. Same argument as is passed to
-                ``MatrixButler.connect()`` or ``MatrixButler.create()``
-            keep_backup (bool, optional): Defaults to ``True``. If ``True``, a backup copy will be made before
-                modifications begin.
-        """
+        # Args:
+        #     parent_directory (str): File path to the parent folder of the `MatrixButler`. Same argument as is passed to
+        #         ``MatrixButler.connect()`` or ``MatrixButler.create()``
+        #     keep_backup (bool, optional): Defaults to ``True``. If ``True``, a backup copy will be made before
+        #         modifications begin.
+        # """
         warn(ButlerOverwriteWarning("Converting an old MatrixButler is a one-way operation."))
 
-        db_path = os.path.join(parenty_directory, MatrixButler.SUBDIRECTORY_NAME, MatrixButler.DB_NAME)
+        db_path = os.path.join(parent_directory, MatrixButler.SUBDIRECTORY_NAME, MatrixButler.DB_NAME)
 
         if keep_backup:
-            backup_path = os.path.join(parenty_directory, MatrixButler.SUBDIRECTORY_NAME, MatrixButler.BACKUP_DB_NAME)
+            backup_path = os.path.join(parent_directory, MatrixButler.SUBDIRECTORY_NAME, MatrixButler.BACKUP_DB_NAME)
             shutil.copy(db_path, backup_path)
 
         connection = sqlite.connect(db_path)
@@ -120,7 +120,7 @@ class MatrixButler(object):
 
     @staticmethod
     def create(parent_directory, zone_system, fortran_max_zones):
-        """Creates a new (or clears and initializes and existing) MatrixButler.
+        """Creates a new (or clears and initializes an existing) MatrixButler.
 
         Args:
             parent_directory (str): The parent directory in which to keep the `MatrixButler`.
@@ -319,7 +319,11 @@ class MatrixButler(object):
         return MatrixEntry(item['id'], item['description'], item['timestamp'], item['type'])
 
     def to_frame(self):
-        """Returns a representation of the MatrixButler's contents as a Pandas DataFrame"""
+        """Retrieves the MatrixButler's contents and displays as a Pandas DataFrame
+
+        Returns:
+            DataFrame: A DataFrame showing a list matrices stored in the MatrixButler
+        """
         uids, descriptions, timestamps, types = [], [], [], []
         for entry in self:
             uids.append(entry.uid)
@@ -714,7 +718,7 @@ class MatrixButler(object):
         return dict(row)
 
     def slice_matrix(self, unique_id, n_slices=1, partition=None):
-        """Slices a matrix into chunks along its rows (on-disk) for use in mutli-processing.
+        """Slices a matrix into chunks along its rows (on-disk) for use in multiprocessing.
 
         Does nothing if matrix is already sliced.
 

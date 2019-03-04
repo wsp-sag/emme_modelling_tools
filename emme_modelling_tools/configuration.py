@@ -55,10 +55,19 @@ class ConfigSpecificationError(AttributeError):
 
 
 class Config(object):
-    """A class to manage model configuration files."""
+    """A class to manage model JSON configuration files."""
 
     @staticmethod
     def fromfile(fp):
+        """Creates a Config instance from a JSON file.
+
+        Args:
+            fp (str): The file path to the JSON configuration file
+
+        Returns:
+            Config: A Config instance loaded with attributes and values from the JSON file.
+        """
+
         dict_ = load_commented_json(fp, object_pairs_hook=OrderedDict)
         root_name, _ = os.path.splitext(os.path.basename(fp))
         return Config(dict_, file=fp, name=root_name)
@@ -140,6 +149,12 @@ class Config(object):
         return item in self._d
 
     def serialize(self):
+        """Serializes a Config object instance into a nested dictionary.
+
+        Returns:
+            dict: A nested dictionary with attributes and values mirroring the source Config object.
+        """
+
         child_dict = OrderedDict()
         for attr, item in self._d.iteritems():
             if isinstance(item, Config):
@@ -151,6 +166,12 @@ class Config(object):
         return child_dict
 
     def tofile(self, fp):
+        """Saves all attributes and values in a Config instance to a JSON file.
+
+        Args:
+            fp (str): The location of the JSON file to save to
+        """
+
         dict_ = self.serialize()
         with open(fp, 'w') as writer:
             json.dump(dict_, writer, sort_keys=True, indent=2)
