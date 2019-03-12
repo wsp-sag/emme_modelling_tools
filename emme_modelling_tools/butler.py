@@ -120,7 +120,7 @@ class MatrixButler(object):
 
     @staticmethod
     def create(parent_directory, zone_system, fortran_max_zones):
-        """Creates a new (or clears and initializes an existing) MatrixButler.
+        """Creates a new (or connects to an existing) MatrixButler.
 
         Args:
             parent_directory (str): The parent directory in which to keep the `MatrixButler`.
